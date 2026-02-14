@@ -1,0 +1,9 @@
+[package]
+name = "fountainhead"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.101"
+bitcoin-consensus-encoding = "=1.0.0-rc.3"
+bitcoinkernel = "0.2.0"
