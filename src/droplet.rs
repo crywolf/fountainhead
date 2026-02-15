@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use bitcoinkernel::Block;
 
-use bitcoin_consensus_encoding::{
-    self as encoding, CompactSizeDecoder, CompactSizeEncoder, Decoder, Encoder2,
+use bitcoin_consensus_encoding as encoding;
+
+use encoding::{
+    ByteVecDecoder, BytesEncoder, CompactSizeDecoder, CompactSizeEncoder, Decodable, Decoder,
+    Decoder2, Encodable, Encoder2,
 };
-use encoding::{BytesEncoder, Decodable, Encodable};
 
 pub struct Droplet {
     pub num: i32,
@@ -26,7 +28,7 @@ impl Droplet {
 
 encoding::encoder_newtype! {
     /// The encoder for the [`Droplet`] type.
-    pub struct DropletEncoder<'e>(Encoder2<CompactSizeEncoder, BytesEncoder<'e>>);
+    pub struct DropletEncoder<'e>(Encoder2<CompactSizeEncoder, Encoder2<CompactSizeEncoder, BytesEncoder<'e>>>);
 }
 
 impl Encodable for Droplet {
@@ -37,14 +39,18 @@ impl Encodable for Droplet {
 
     fn encoder(&self) -> Self::Encoder<'_> {
         let num = CompactSizeEncoder::new(self.num as usize);
-        let data = BytesEncoder::without_length_prefix(self.data.as_ref());
+
+        let data = Encoder2::new(
+            CompactSizeEncoder::new(self.data.len()),
+            BytesEncoder::without_length_prefix(self.data.as_ref()),
+        );
 
         DropletEncoder(Encoder2::new(num, data))
     }
 }
 
-#[derive(Default)]
 pub struct DropletDecoder {
+    decoder: Option<Decoder2<CompactSizeDecoder, ByteVecDecoder>>,
     num: usize,
     data: Vec<u8>,
 }
@@ -53,7 +59,13 @@ impl Decodable for Droplet {
     type Decoder = DropletDecoder;
 
     fn decoder() -> Self::Decoder {
-        Self::Decoder::default()
+        let num_decoder = CompactSizeDecoder::new();
+        let data_decoder = ByteVecDecoder::new();
+        Self::Decoder {
+            decoder: Some(Decoder2::new(num_decoder, data_decoder)),
+            num: 0,
+            data: Vec::default(),
+        }
     }
 }
 
@@ -62,11 +74,19 @@ impl Decoder for DropletDecoder {
     type Error = anyhow::Error;
 
     fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
-        let mut num_dec = CompactSizeDecoder::default();
-        num_dec.push_bytes(bytes)?;
-        self.num = num_dec.end()?;
+        if let Some(mut decoder) = self.decoder.take() {
+            if decoder.push_bytes(bytes)? {
+                self.decoder = Some(decoder);
+                return Ok(true);
+            }
 
-        self.data.extend_from_slice(bytes);
+            let (num, data) = decoder.end()?;
+            self.num = num;
+            self.data = data;
+
+            self.decoder = None;
+        }
+
         Ok(false)
     }
 
@@ -79,6 +99,10 @@ impl Decoder for DropletDecoder {
     }
 
     fn read_limit(&self) -> usize {
-        todo!()
+        if let Some(decoder) = &self.decoder {
+            decoder.read_limit()
+        } else {
+            0
+        }
     }
 }
