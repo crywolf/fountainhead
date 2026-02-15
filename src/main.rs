@@ -106,7 +106,7 @@ fn main() -> Result<()> {
 
             let droplet: Droplet =
                 encoding::decode_from_slice(&encoded_droplet).context("decode droplet")?;
-            println!("<- reconstructed: {} bytes", droplet.size);
+            println!("<- reconstructed #{}: {} bytes", droplet.num, droplet.size);
 
             let block = Block::new(droplet.as_bytes()).context("new block from droplet bytes")?;
 

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use bitcoinkernel::Block;
 
-use bitcoin_consensus_encoding::{self as encoding, Decoder};
+use bitcoin_consensus_encoding::{
+    self as encoding, CompactSizeDecoder, CompactSizeEncoder, Decoder, Encoder2,
+};
 use encoding::{BytesEncoder, Decodable, Encodable};
 
 pub struct Droplet {
@@ -24,7 +26,7 @@ impl Droplet {
 
 encoding::encoder_newtype! {
     /// The encoder for the [`Droplet`] type.
-    pub struct DropletEncoder<'e>(BytesEncoder<'e>);
+    pub struct DropletEncoder<'e>(Encoder2<CompactSizeEncoder, BytesEncoder<'e>>);
 }
 
 impl Encodable for Droplet {
@@ -34,36 +36,16 @@ impl Encodable for Droplet {
         Self: 'e;
 
     fn encoder(&self) -> Self::Encoder<'_> {
+        let num = CompactSizeEncoder::new(self.num as usize);
         let data = BytesEncoder::without_length_prefix(self.data.as_ref());
 
-        DropletEncoder(data)
-    }
-}
-
-impl Decoder for DropletDecoder {
-    type Output = Droplet;
-    type Error = anyhow::Error;
-
-    fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
-        self.data.extend_from_slice(bytes);
-        Ok(false)
-    }
-
-    fn end(self) -> std::result::Result<Self::Output, Self::Error> {
-        Ok(Droplet {
-            num: 0, // TODO
-            size: self.data.len(),
-            data: self.data,
-        })
-    }
-
-    fn read_limit(&self) -> usize {
-        todo!()
+        DropletEncoder(Encoder2::new(num, data))
     }
 }
 
 #[derive(Default)]
 pub struct DropletDecoder {
+    num: usize,
     data: Vec<u8>,
 }
 
@@ -72,5 +54,31 @@ impl Decodable for Droplet {
 
     fn decoder() -> Self::Decoder {
         Self::Decoder::default()
+    }
+}
+
+impl Decoder for DropletDecoder {
+    type Output = Droplet;
+    type Error = anyhow::Error;
+
+    fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
+        let mut num_dec = CompactSizeDecoder::default();
+        num_dec.push_bytes(bytes)?;
+        self.num = num_dec.end()?;
+
+        self.data.extend_from_slice(bytes);
+        Ok(false)
+    }
+
+    fn end(self) -> std::result::Result<Self::Output, Self::Error> {
+        Ok(Droplet {
+            num: self.num as i32,
+            size: self.data.len(),
+            data: self.data,
+        })
+    }
+
+    fn read_limit(&self) -> usize {
+        todo!()
     }
 }
