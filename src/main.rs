@@ -1,4 +1,4 @@
-use std::{env, process};
+use std::{env, fs, process};
 
 use anyhow::{Context, Result};
 use bitcoin_consensus_encoding as encoding;
@@ -13,16 +13,16 @@ const WORKER_THREADS: i32 = 8;
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 4 {
+    if args.len() < 5 {
         eprintln!(
-            "Usage: {} <COMMAND> <path_to_input_dir> <path_to_output_dir>",
+            "Usage: {} <COMMAND> <path_to_input_dir> <path_to_output_dir> <path_to_droplets_dir>",
             args[0]
         );
         process::exit(1);
     }
 
     let command = args[1].clone();
-    if !["compress", "reconstruct"].contains(&command.as_str()) {
+    if !["compress", "restore"].contains(&command.as_str()) {
         eprintln!("Unknown command {}", command);
         process::exit(1);
     }
@@ -33,6 +33,8 @@ fn main() -> Result<()> {
     let output_data_dir = args[3].clone();
     let output_blocks_dir = format!("{}/blocks", output_data_dir);
 
+    let droplets_dir = args[4].clone();
+
     let context = ContextBuilder::new()
         .chain_type(ChainType::Signet)
         .build()?;
@@ -40,11 +42,6 @@ fn main() -> Result<()> {
     let in_chainman = ChainstateManagerBuilder::new(&context, &input_data_dir, &input_blocks_dir)?
         .worker_threads(WORKER_THREADS)
         .build()?;
-
-    let out_chainman =
-        ChainstateManagerBuilder::new(&context, &output_data_dir, &output_blocks_dir)?
-            .worker_threads(WORKER_THREADS)
-            .build()?;
 
     let chain = in_chainman.active_chain();
 
@@ -61,7 +58,9 @@ fn main() -> Result<()> {
     println!("-----");
 
     if command == "compress" {
-        for entry in chain.iter().take(5) {
+        fs::create_dir_all(&droplets_dir).context("create dir to store droplets")?;
+
+        for entry in chain.iter().take(10) {
             println!(
                 ">  Reading block {} at height {}",
                 entry.block_hash(),
@@ -72,19 +71,44 @@ fn main() -> Result<()> {
                 .context("read block data")?;
 
             let droplet = Droplet::new(entry.height(), block).context("create droplet")?;
-            let encoded = encoding::encode_to_vec(&droplet);
+            let encoded_droplet = encoding::encode_to_vec(&droplet);
             println!(
                 "-> droplet: {}, size: {}, encoded: {} bytes",
                 droplet.num,
                 droplet.size,
-                encoded.len()
+                encoded_droplet.len()
             );
 
-            let decoded: Droplet =
-                encoding::decode_from_slice(&encoded).context("decode droplet")?;
-            println!("<- reconstructed: {} bytes", decoded.size);
+            let droplet_file_path = format!("{}/drp{}.dat", droplets_dir, droplet.num);
+            fs::write(droplet_file_path, encoded_droplet)?;
+        }
+    } else if command == "restore" {
+        let out_chainman =
+            ChainstateManagerBuilder::new(&context, &output_data_dir, &output_blocks_dir)?
+                .worker_threads(WORKER_THREADS)
+                .build()?;
 
-            let block = Block::new(decoded.as_bytes()).context("new block from droplet bytes")?;
+        let mut droplet_files = fs::read_dir(&droplets_dir)
+            .with_context(|| format!("read dir {}", droplets_dir))?
+            .map(|res| res.map(|e| e.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // sort droplet files by their path, ie. name
+        droplet_files.sort();
+
+        for droplet_file_path in droplet_files {
+            if !droplet_file_path.is_file() {
+                continue;
+            }
+
+            let encoded_droplet = fs::read(droplet_file_path.as_path())
+                .with_context(|| format!("read droplet file {}", droplet_file_path.display()))?;
+
+            let droplet: Droplet =
+                encoding::decode_from_slice(&encoded_droplet).context("decode droplet")?;
+            println!("<- reconstructed: {} bytes", droplet.size);
+
+            let block = Block::new(droplet.as_bytes()).context("new block from droplet bytes")?;
 
             match out_chainman.process_block(&block) {
                 ProcessBlockResult::NewBlock => {
@@ -98,23 +122,21 @@ fn main() -> Result<()> {
                 }
             }
         }
-    } else {
-        todo!()
+
+        println!("-----");
+
+        let out_chain = out_chainman.active_chain();
+
+        // Get the reconstructed tip
+        let tip = out_chain.tip();
+        println!("Reconstructed chain height: {}", out_chain.height());
+        println!("Reconstructed tip hash: {}", tip.block_hash());
+        let block = out_chainman.read_block_data(&tip)?;
+        println!(
+            "Transactions count in the last reconstructed block: {}",
+            block.transaction_count()
+        );
     }
-
-    println!("-----");
-
-    let out_chain = out_chainman.active_chain();
-
-    // Get the reconstructed tip
-    let tip = out_chain.tip();
-    println!("Reconstructed chain height: {}", out_chain.height());
-    println!("Reconstructed tip hash: {}", tip.block_hash());
-    let block = out_chainman.read_block_data(&tip)?;
-    println!(
-        "Transactions count in the last reconstructed block: {}",
-        block.transaction_count()
-    );
 
     Ok(())
 }
