@@ -7,7 +7,10 @@ use bitcoinkernel::{
     ProcessBlockResult,
 };
 
-use crate::{config::Config, droplet::Droplet};
+use crate::{
+    config::Config,
+    droplet::{Droplet, Neighbor},
+};
 
 pub struct Blockchain {
     config: Config,
@@ -73,7 +76,10 @@ impl Blockchain {
                 .read_block_data(&entry)
                 .context("read block data")?;
 
-            let droplet = Droplet::new(entry.height(), block).context("create droplet")?;
+            let neighbors = vec![Neighbor::new(entry.height() as usize)];
+
+            let droplet = Droplet::new(entry.height() as usize, neighbors, block)
+                .context("create droplet")?;
             let encoded_droplet = encoding::encode_to_vec(&droplet);
             println!(
                 "-> droplet: {}, size: {}, encoded: {} bytes",
@@ -110,7 +116,10 @@ impl Blockchain {
 
             let droplet: Droplet =
                 encoding::decode_from_slice(&encoded_droplet).context("decode droplet")?;
-            println!("<- reconstructed #{}: {} bytes", droplet.num, droplet.size);
+            println!(
+                "<- reconstructed #{}; neighbors: {:?}, {} bytes",
+                droplet.num, droplet.neighbors, droplet.size
+            );
 
             let block = Block::new(droplet.as_bytes()).context("new block from droplet bytes")?;
 
