@@ -10,6 +10,7 @@ use bitcoinkernel::{
 use crate::{
     config::Config,
     droplet::{Droplet, Neighbor},
+    padded_block::PaddedBlock,
 };
 
 pub struct Blockchain {
@@ -65,7 +66,22 @@ impl Blockchain {
 
         fs::create_dir_all(&self.config.droplets_dir).context("create dir to store droplets")?;
 
-        for entry in chain.iter().take(10) {
+        let num_blocks_to_store = 11;
+
+        // determine max block size for padding
+        let mut max_block_size = 0;
+        for entry in chain.iter().take(num_blocks_to_store) {
+            let block = self
+                .in_chainman
+                .read_block_data(&entry)
+                .context("read block data")?;
+            let block_size = block.consensus_encode()?.len();
+            if block_size > max_block_size {
+                max_block_size = block_size;
+            }
+        }
+
+        for entry in chain.iter().take(num_blocks_to_store) {
             println!(
                 ">  Reading block {} at height {}",
                 entry.block_hash(),
@@ -78,17 +94,24 @@ impl Blockchain {
 
             let neighbors = vec![Neighbor::new(entry.height() as usize)];
 
-            let droplet = Droplet::new(entry.height() as usize, neighbors, block)
+            // adaptive zero-padding
+            let padded_block =
+                PaddedBlock::new(block, max_block_size).context("create padded block")?;
+
+            let droplet = Droplet::new(entry.height() as usize, neighbors, padded_block)
                 .context("create droplet")?;
             let encoded_droplet = encoding::encode_to_vec(&droplet);
             println!(
-                "-> droplet: {}, size: {}, encoded: {} bytes",
+                "-> droplet: {}, size: {}, encoded: {} bytes, block: {} bytes",
                 droplet.num,
-                droplet.size,
-                encoded_droplet.len()
+                droplet.data_size,
+                encoded_droplet.len(),
+                droplet.block_size,
             );
 
-            let droplet_file_path = format!("{}/drp{}.dat", self.config.droplets_dir, droplet.num);
+            let droplet_filename = format!("{:06}", droplet.num);
+            let droplet_file_path =
+                format!("{}/drp{}.dat", self.config.droplets_dir, droplet_filename);
             fs::write(droplet_file_path, encoded_droplet)?;
         }
 
@@ -117,11 +140,12 @@ impl Blockchain {
             let droplet: Droplet =
                 encoding::decode_from_slice(&encoded_droplet).context("decode droplet")?;
             println!(
-                "<- reconstructed #{}; neighbors: {:?}, {} bytes",
-                droplet.num, droplet.neighbors, droplet.size
+                "<- reconstructed #{}; neighbors: {:?}, droplet: {} bytes, block: {} bytes",
+                droplet.num, droplet.neighbors, droplet.data_size, droplet.block_size
             );
 
-            let block = Block::new(droplet.as_bytes()).context("new block from droplet bytes")?;
+            let block =
+                Block::new(droplet.as_block_bytes()).context("new block from droplet bytes")?;
 
             match self.out_chainman.process_block(&block) {
                 ProcessBlockResult::NewBlock => {

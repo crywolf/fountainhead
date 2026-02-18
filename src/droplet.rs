@@ -1,8 +1,7 @@
-use anyhow::{Context, Result};
-use bitcoinkernel::Block;
+use anyhow::Result;
 
 use bitcoin_consensus_encoding::{
-    self as encoding, CompactSizeDecoderError, Decoder3, Encoder3, SliceEncoder, VecDecoder,
+    self as encoding, CompactSizeDecoderError, Decoder4, Encoder4, SliceEncoder, VecDecoder,
 };
 
 use encoding::{
@@ -10,35 +9,49 @@ use encoding::{
     Encodable, Encoder2,
 };
 
+use crate::padded_block::PaddedBlock;
+
 pub struct Droplet {
     /// Droplet number
     pub num: usize,
     /// Indices (block heights) of blocks included in this droplet
     pub neighbors: Vec<Neighbor>,
     /// Size of encoded block in bytes
-    pub size: usize,
-    /// Block data
+    pub block_size: usize,
+    /// Size of encoded padded data in bytes
+    pub data_size: usize,
+    /// Padded block data
     data: Vec<u8>,
 }
 
 impl Droplet {
-    pub fn new(num: usize, neighbors: Vec<Neighbor>, block: Block) -> Result<Self> {
-        let data = block.consensus_encode().context("consensus_encode")?;
-        let size = data.len();
+    pub fn new(num: usize, neighbors: Vec<Neighbor>, padded_block: PaddedBlock) -> Result<Self> {
+        let block_size = padded_block.block_size;
+
+        let data = padded_block.data;
+        let data_size = data.len();
+
         Ok(Self {
             num,
             neighbors,
-            size,
+            block_size,
+            data_size,
             data,
         })
     }
 
+    #[allow(dead_code)]
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn as_block_bytes(&self) -> &[u8] {
+        &self.data[0..self.block_size]
     }
 }
 
 /// Block number
+#[derive(Clone)]
 pub struct Neighbor(usize);
 
 impl std::fmt::Debug for Neighbor {
@@ -96,7 +109,7 @@ impl Decoder for NeighborDecoder {
 
 encoding::encoder_newtype! {
     /// The encoder for the [`Droplet`] type.
-    pub struct DropletEncoder<'e>(Encoder3<CompactSizeEncoder, Encoder2<CompactSizeEncoder, SliceEncoder<'e, Neighbor>>, Encoder2<CompactSizeEncoder, BytesEncoder<'e>>>);
+    pub struct DropletEncoder<'e>(Encoder4<CompactSizeEncoder, Encoder2<CompactSizeEncoder, SliceEncoder<'e, Neighbor>>, CompactSizeEncoder, Encoder2<CompactSizeEncoder, BytesEncoder<'e>>>);
 }
 
 impl Encodable for Droplet {
@@ -113,20 +126,25 @@ impl Encodable for Droplet {
             SliceEncoder::without_length_prefix(self.neighbors.as_ref()),
         );
 
+        let block_size = CompactSizeEncoder::new(self.block_size);
+
         let data = Encoder2::new(
             CompactSizeEncoder::new(self.data.len()),
             BytesEncoder::without_length_prefix(self.data.as_ref()),
         );
 
-        DropletEncoder(Encoder3::new(num, neighbors, data))
+        DropletEncoder(Encoder4::new(num, neighbors, block_size, data))
     }
 }
 
 /// The decoder for the [`Droplet`] type.
 pub struct DropletDecoder {
-    decoder: Option<Decoder3<CompactSizeDecoder, VecDecoder<Neighbor>, ByteVecDecoder>>,
+    decoder: Option<
+        Decoder4<CompactSizeDecoder, VecDecoder<Neighbor>, CompactSizeDecoder, ByteVecDecoder>,
+    >,
     num: usize,
     neighbors: Vec<Neighbor>,
+    block_size: usize,
     data: Vec<u8>,
 }
 
@@ -136,11 +154,19 @@ impl Decodable for Droplet {
     fn decoder() -> Self::Decoder {
         let num_decoder = CompactSizeDecoder::new();
         let neighbors_decoder = VecDecoder::new();
+        let block_size_decoder = CompactSizeDecoder::new();
         let data_decoder = ByteVecDecoder::new();
+
         Self::Decoder {
-            decoder: Some(Decoder3::new(num_decoder, neighbors_decoder, data_decoder)),
-            neighbors: Vec::default(),
+            decoder: Some(Decoder4::new(
+                num_decoder,
+                neighbors_decoder,
+                block_size_decoder,
+                data_decoder,
+            )),
             num: 0,
+            neighbors: Vec::default(),
+            block_size: 0,
             data: Vec::default(),
         }
     }
@@ -157,9 +183,10 @@ impl Decoder for DropletDecoder {
                 return Ok(true);
             }
 
-            let (num, neighbors, data) = decoder.end()?;
+            let (num, neighbors, block_size, data) = decoder.end()?;
             self.num = num;
             self.neighbors = neighbors;
+            self.block_size = block_size;
             self.data = data;
 
             self.decoder = None;
@@ -172,7 +199,8 @@ impl Decoder for DropletDecoder {
         Ok(Droplet {
             num: self.num,
             neighbors: self.neighbors,
-            size: self.data.len(),
+            block_size: self.block_size,
+            data_size: self.data.len(),
             data: self.data,
         })
     }

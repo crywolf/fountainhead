@@ -1,3 +1,4 @@
 pub mod blockchain;
 pub mod config;
-pub mod droplet;
+mod droplet;
+mod padded_block;
