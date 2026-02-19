@@ -16,8 +16,8 @@ use crate::{
 
 pub struct Blockchain {
     config: Config,
-    in_chainman: ChainstateManager,
-    out_chainman: ChainstateManager,
+    in_chainman: InputChainstateManager,
+    out_chainman: OutputChainstateManager,
 }
 
 impl Blockchain {
@@ -27,20 +27,22 @@ impl Blockchain {
             .build()?;
 
         let input_blocks_dir = format!("{}/blocks", &config.input_data_dir);
-        let in_chainman =
+        let in_chainman = InputChainstateManager::from(
             ChainstateManagerBuilder::new(&context, &config.input_data_dir, &input_blocks_dir)?
                 .worker_threads(config.worker_threads)
-                .build()?;
+                .build()?,
+        );
 
         let output_blocks_dir = format!("{}/blocks", &config.output_data_dir);
-        let out_chainman =
+        let out_chainman = OutputChainstateManager::from(
             ChainstateManagerBuilder::new(&context, &config.output_data_dir, &output_blocks_dir)?
                 .worker_threads(config.worker_threads)
-                .build()?;
+                .build()?,
+        );
 
         ///////////////////////
 
-        let chain = in_chainman.active_chain();
+        let chain = in_chainman.inner.active_chain();
         println!("Initializing blockchain reader");
         println!("Active chain height: {}", chain.height());
 
@@ -56,7 +58,7 @@ impl Blockchain {
     }
 
     pub fn compress(&self) -> Result<()> {
-        let chain = self.in_chainman.active_chain();
+        let chain = self.in_chainman.inner.active_chain();
 
         fs::create_dir_all(&self.config.droplets_dir).context("create dir to store droplets")?;
 
@@ -67,6 +69,7 @@ impl Blockchain {
         for entry in chain.iter().take(num_blocks_to_store) {
             let block = self
                 .in_chainman
+                .inner
                 .read_block_data(&entry)
                 .context("read block data")?;
             let block_size = block.consensus_encode()?.len();
@@ -83,6 +86,7 @@ impl Blockchain {
             );
             let block = self
                 .in_chainman
+                .inner
                 .read_block_data(&entry)
                 .context("read block data")?;
 
@@ -154,7 +158,7 @@ impl Blockchain {
 
         // process queued blocks
         for (i, block) in block_queue.iter() {
-            match self.out_chainman.process_block(block) {
+            match self.out_chainman.inner.process_block(block) {
                 ProcessBlockResult::NewBlock => {
                     println!("<  Reconstructed block {i} validated and written to disk")
                 }
@@ -171,18 +175,38 @@ impl Blockchain {
 
         println!("-----");
 
-        let out_chain = self.out_chainman.active_chain();
+        let out_chain = self.out_chainman.inner.active_chain();
 
         // Get the reconstructed tip
         let tip = out_chain.tip();
         println!("Reconstructed chain height: {}", out_chain.height());
         println!("Reconstructed tip hash: {}", tip.block_hash());
-        let block = self.out_chainman.read_block_data(&tip)?;
+        let block = self.out_chainman.inner.read_block_data(&tip)?;
         println!(
             "Transactions count in the last reconstructed block: {}",
             block.transaction_count()
         );
 
         Ok(())
+    }
+}
+
+pub struct InputChainstateManager {
+    inner: ChainstateManager,
+}
+
+impl From<ChainstateManager> for InputChainstateManager {
+    fn from(value: ChainstateManager) -> Self {
+        Self { inner: value }
+    }
+}
+
+pub struct OutputChainstateManager {
+    inner: ChainstateManager,
+}
+
+impl From<ChainstateManager> for OutputChainstateManager {
+    fn from(value: ChainstateManager) -> Self {
+        Self { inner: value }
     }
 }
