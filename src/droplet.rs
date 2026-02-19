@@ -1,12 +1,10 @@
 use anyhow::Result;
 
-use bitcoin_consensus_encoding::{
-    self as encoding, CompactSizeDecoderError, Decoder4, Encoder4, SliceEncoder, VecDecoder,
-};
+use bitcoin_consensus_encoding as encoding;
 
 use encoding::{
-    ByteVecDecoder, BytesEncoder, CompactSizeDecoder, CompactSizeEncoder, Decodable, Decoder,
-    Encodable, Encoder2,
+    ByteVecDecoder, BytesEncoder, CompactSizeDecoder, CompactSizeDecoderError, CompactSizeEncoder,
+    Decodable, Decoder, Decoder4, Encodable, Encoder2, Encoder4, SliceEncoder, VecDecoder,
 };
 
 use crate::padded_block::PaddedBlock;

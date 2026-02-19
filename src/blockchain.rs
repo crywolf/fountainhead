@@ -1,4 +1,4 @@
-use std::fs;
+use std::{collections::BTreeMap, fs};
 
 use anyhow::{Context as _, Result};
 use bitcoin_consensus_encoding as encoding;
@@ -6,6 +6,7 @@ use bitcoinkernel::{
     Block, ChainType, ChainstateManager, ChainstateManagerBuilder, ContextBuilder,
     ProcessBlockResult,
 };
+use rand::seq::SliceRandom;
 
 use crate::{
     config::Config,
@@ -40,15 +41,8 @@ impl Blockchain {
         ///////////////////////
 
         let chain = in_chainman.active_chain();
-        // Get the current tip
-        let tip = chain.tip();
-        println!("Chain height: {}", chain.height());
-        println!("Tip hash: {}", tip.block_hash());
-        let block = in_chainman.read_block_data(&tip)?;
-        println!(
-            "Transactions count in the last block: {}",
-            block.transaction_count()
-        );
+        println!("Initializing blockchain reader");
+        println!("Active chain height: {}", chain.height());
 
         println!("-----");
 
@@ -127,7 +121,13 @@ impl Blockchain {
             .collect::<Result<Vec<_>, _>>()?;
 
         // sort droplet files by their path, ie. name
-        droplet_files.sort();
+        // droplet_files.sort();
+
+        // shuffle droplets to simulate randomness of blocks decoding order
+        let mut rng = rand::rng();
+        droplet_files.shuffle(&mut rng);
+
+        let mut block_queue = BTreeMap::new();
 
         for droplet_file_path in droplet_files {
             if !droplet_file_path.is_file() {
@@ -147,15 +147,22 @@ impl Blockchain {
             let block =
                 Block::new(droplet.as_block_bytes()).context("new block from droplet bytes")?;
 
-            match self.out_chainman.process_block(&block) {
+            // add to queue
+            block_queue.insert(droplet.num, block);
+        }
+        println!("-----");
+
+        // process queued blocks
+        for (i, block) in block_queue.iter() {
+            match self.out_chainman.process_block(block) {
                 ProcessBlockResult::NewBlock => {
-                    println!("<  Reconstructed block validated and written to disk")
+                    println!("<  Reconstructed block {i} validated and written to disk")
                 }
                 ProcessBlockResult::Duplicate => {
-                    println!("<  Reconstructed block already known (valid)")
+                    println!("<  Reconstructed block {i} already known (valid)")
                 }
                 ProcessBlockResult::Rejected => {
-                    println!("!!! Reconstructed block validation failed !!!")
+                    println!("!!! Reconstructed block {i} validation failed !!!")
                 }
             }
         }
