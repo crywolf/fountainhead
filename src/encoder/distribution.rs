@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use rand::{Rng, RngExt};
 
 /// [Robust Soliton Distribution](https://en.wikipedia.org/wiki/Soliton_distribution) for Fountain codes

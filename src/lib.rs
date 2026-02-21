@@ -1,6 +1,6 @@
 pub mod blockchain;
-mod compression;
 pub mod config;
-mod decompression;
+mod decoder;
 mod droplet;
+mod encoder;
 mod padded_block;

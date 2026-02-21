@@ -1,20 +1,18 @@
-#![allow(dead_code)]
+#![cfg(test)]
 
 use rand::distr::Distribution as _;
 use rand::{Rng, RngExt};
 
-pub use crate::compression::distribution::RobustSoliton;
-
-mod distribution;
+use crate::encoder::distribution::RobustSoliton;
 
 /// Fountain code encoder using robust soliton distribution
-pub struct FountainEncoder {
+pub struct TestFountainEncoder {
     k: usize,                     // Number of source symbols (ie. blocks in our case)
     source_symbols: Vec<Vec<u8>>, // Source data
     degree_distribution: RobustSoliton,
 }
 
-impl FountainEncoder {
+impl TestFountainEncoder {
     pub fn new(source_symbols: Vec<Vec<u8>>, degree_distribution: RobustSoliton) -> Self {
         let k = source_symbols.len();
 
@@ -69,7 +67,7 @@ mod encoder_tests {
         let delta = 0.05; // Failure probability (typically 0.01 to 0.5)
 
         let degree_distribution = RobustSoliton::new(source.len(), c, delta);
-        let encoder = FountainEncoder::new(source, degree_distribution);
+        let encoder = TestFountainEncoder::new(source, degree_distribution);
         let mut rng = rand::rng();
 
         for _ in 0..4 {

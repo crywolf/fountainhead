@@ -1,3 +1,4 @@
+#![cfg(test)]
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -11,7 +12,7 @@ struct EncodedSymbol {
 }
 
 /// Belief propagation decoder for Fountain codes
-pub struct FountainDecoder {
+pub struct TestFountainDecoder {
     k: usize,                                   // Number of source symbols
     symbol_size: usize,                         // Size of each symbol in bytes
     encoded_symbols: Vec<EncodedSymbol>,        // Received encoded symbols
@@ -19,10 +20,10 @@ pub struct FountainDecoder {
     symbol_counter: usize,                      // Counter for encoded symbol IDs
 }
 
-impl FountainDecoder {
+impl TestFountainDecoder {
     /// Create a new decoder for k source symbols of given size
     pub fn new(k: usize, symbol_size: usize) -> Self {
-        FountainDecoder {
+        TestFountainDecoder {
             k,
             symbol_size,
             encoded_symbols: Vec::new(),
@@ -138,14 +139,14 @@ impl FountainDecoder {
 #[cfg(test)]
 mod decoder_tests {
     use super::*;
-    use crate::compression::{FountainEncoder, RobustSoliton};
+    use crate::encoder::{distribution::RobustSoliton, test_encoder::TestFountainEncoder};
 
     const C: f64 = 0.03; // Constant factor (typically 0.03 to 0.1)
     const DELTA: f64 = 0.02; // Failure probability (typically 0.01 to 0.5)
 
     #[test]
     fn test_simple_single_symbol_recovery() {
-        let mut decoder = FountainDecoder::new(1, 32);
+        let mut decoder = TestFountainDecoder::new(1, 32);
 
         // Add an encoded symbol that depends only on source symbol 0
         let source_data = vec![42u8; 32];
@@ -178,7 +179,7 @@ mod decoder_tests {
         // Encode using FountainEncoder
         let degree_distribution = RobustSoliton::new(k, c, delta);
 
-        let encoder = FountainEncoder::new(source_symbols.clone(), degree_distribution);
+        let encoder = TestFountainEncoder::new(source_symbols.clone(), degree_distribution);
         let mut rng = rand::rng();
 
         // Generate enough encoded symbols to recover all source symbols
@@ -192,7 +193,7 @@ mod decoder_tests {
         }
 
         // Decode
-        let mut decoder = FountainDecoder::new(k, symbol_size);
+        let mut decoder = TestFountainDecoder::new(k, symbol_size);
 
         for (neighbors, data) in encoded_data {
             decoder.add_symbol(neighbors, data);
@@ -222,7 +223,7 @@ mod decoder_tests {
 
         // Encode
         let degree_distribution = RobustSoliton::new(k, C, DELTA);
-        let encoder = FountainEncoder::new(source_symbols.clone(), degree_distribution);
+        let encoder = TestFountainEncoder::new(source_symbols.clone(), degree_distribution);
         let mut rng = rand::rng();
 
         // Generate encoded symbols (typically need k + small overhead)
@@ -236,7 +237,7 @@ mod decoder_tests {
         }
 
         // Decode
-        let mut decoder = FountainDecoder::new(k, symbol_size);
+        let mut decoder = TestFountainDecoder::new(k, symbol_size);
 
         for (neighbors, data) in encoded_data {
             decoder.add_symbol(neighbors, data);
@@ -270,7 +271,7 @@ mod decoder_tests {
 
         // Encode
         let degree_distribution = RobustSoliton::new(k, C, DELTA);
-        let encoder = FountainEncoder::new(source_symbols, degree_distribution);
+        let encoder = TestFountainEncoder::new(source_symbols, degree_distribution);
         let mut rng = rand::rng();
 
         // Generate only k-1 encoded symbols (insufficient)
@@ -281,7 +282,7 @@ mod decoder_tests {
         }
 
         // Try to decode
-        let mut decoder = FountainDecoder::new(k, symbol_size);
+        let mut decoder = TestFountainDecoder::new(k, symbol_size);
 
         for (neighbors, data) in encoded_data {
             decoder.add_symbol(neighbors, data);
