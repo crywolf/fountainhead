@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use rand::{Rng, RngExt};
 
 /// [Robust Soliton Distribution](https://en.wikipedia.org/wiki/Soliton_distribution) for Fountain codes
@@ -6,7 +5,7 @@ pub struct RobustSoliton {
     k: usize,      // Number of source symbols (ie. blocks in our case)
     cdf: Vec<f64>, // Cumulative Distribution Function
     delta: f64,    // Failure probability (typically 0.01 to 0.5)
-    r: usize,      // R = c*ln(K/δ)*√K.
+    r: usize,      // R = c*ln(K/δ)*√K
 }
 
 impl RobustSoliton {
@@ -17,9 +16,13 @@ impl RobustSoliton {
     ///
     /// Constant factor is typically 0.03 to 0.1, Failure probability typically 0.01 to 0.5
     pub fn new(k: usize, c: f64, delta: f64) -> Self {
-        let r = ((k as f64 / delta).ln() * c * (k as f64).sqrt()) as usize;
+        // R = c*ln(K/δ)*√K
+        let mut r = (c * (k as f64 / delta).ln() * (k as f64).sqrt()) as usize;
+        if r == 0 {
+            r = 1
+        };
 
-        let mut distribution = RobustSoliton {
+        let mut distribution = Self {
             k,
             cdf: Vec::new(),
             delta,
@@ -173,11 +176,14 @@ mod tests {
         assert_eq!(max_degree, 2, "Degree 2 should be the most frequent");
 
         // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
-        assert_eq!(distribution.r, 244, "R for k = 10000 is not correct");
+        assert_eq!(
+            distribution.r, 244,
+            "R for k=10000, c=0.2, delta=0.05 is not correct"
+        );
         assert_eq!(
             (k as f64 / distribution.r as f64).ceil(),
             41.0,
-            "k/R for k = 10000 is not correct"
+            "k/R for k=10000, c=0.2, delta=0.05 is not correct"
         );
     }
 }

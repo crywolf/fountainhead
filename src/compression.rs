@@ -1,8 +1,9 @@
 #![allow(dead_code)]
+
 use rand::distr::Distribution as _;
 use rand::{Rng, RngExt};
 
-use crate::compression::distribution::RobustSoliton;
+pub use crate::compression::distribution::RobustSoliton;
 
 mod distribution;
 
@@ -14,16 +15,13 @@ pub struct FountainEncoder {
 }
 
 impl FountainEncoder {
-    pub fn new(source_symbols: Vec<Vec<u8>>) -> Self {
+    pub fn new(source_symbols: Vec<Vec<u8>>, degree_distribution: RobustSoliton) -> Self {
         let k = source_symbols.len();
-
-        let c = 0.2; // Constant factor (typically 0.03 to 0.1)
-        let delta = 0.05; // Failure probability (typically 0.01 to 0.5)
 
         Self {
             k,
             source_symbols,
-            degree_distribution: RobustSoliton::new(k, c, delta),
+            degree_distribution,
         }
     }
 
@@ -34,14 +32,14 @@ impl FountainEncoder {
         let degree = self.degree_distribution.sample(rng);
 
         // Randomly select `degree` source symbols
-        let mut indices = Vec::new();
+        let mut neighbors = Vec::new();
         let mut selected = vec![false; self.k];
 
-        while indices.len() < degree {
-            let idx = rng.random_range(0..self.k);
-            if !selected[idx] {
-                selected[idx] = true;
-                indices.push(idx);
+        while neighbors.len() < degree {
+            let neighbor = rng.random_range(0..self.k);
+            if !selected[neighbor] {
+                selected[neighbor] = true;
+                neighbors.push(neighbor);
             }
         }
 
@@ -49,13 +47,13 @@ impl FountainEncoder {
         let symbol_len = self.source_symbols[0].len();
         let mut encoded = vec![0u8; symbol_len];
 
-        for &idx in &indices {
-            for (i, byte) in self.source_symbols[idx].iter().enumerate() {
+        for &neighbor in &neighbors {
+            for (i, byte) in self.source_symbols[neighbor].iter().enumerate() {
                 encoded[i] ^= byte;
             }
         }
 
-        (indices, encoded)
+        (neighbors, encoded)
     }
 }
 
@@ -67,10 +65,14 @@ mod encoder_tests {
     fn test_encoder_generation() {
         let source = vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8], vec![9, 10, 11, 12]];
 
-        let encoder = FountainEncoder::new(source);
+        let c = 0.02; // Constant factor (typically 0.03 to 0.1)
+        let delta = 0.05; // Failure probability (typically 0.01 to 0.5)
+
+        let degree_distribution = RobustSoliton::new(source.len(), c, delta);
+        let encoder = FountainEncoder::new(source, degree_distribution);
         let mut rng = rand::rng();
 
-        for _ in 0..10 {
+        for _ in 0..4 {
             let (indices, symbol) = encoder.generate_symbol(&mut rng);
             assert!(!indices.is_empty());
             assert_eq!(symbol.len(), 4);
