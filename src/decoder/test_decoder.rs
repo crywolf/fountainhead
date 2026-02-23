@@ -181,7 +181,7 @@ mod decoder_tests {
 
         // Generate enough encoded symbols to recover all source symbols
         // With robust soliton, typically need k + overhead symbols
-        let num_encoded = degree_distribution.min_encoded_symbols();
+        let num_encoded = degree_distribution.min_encoded_symbols() + 1;
 
         let encoder = TestFountainEncoder::new(source_symbols.clone(), degree_distribution);
         let mut rng = rand::rng();

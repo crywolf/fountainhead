@@ -11,7 +11,7 @@ pub struct RobustSoliton {
     /// Failure probability (typically 0.01 to 0.5)
     delta: f64,
     /// R = c*ln(K/δ)*√K
-    r: usize,
+    r: f64,
     /// Normalization factor β = ∑ ρ(d) + θ(d)
     beta: f64,
 }
@@ -25,9 +25,9 @@ impl RobustSoliton {
     /// Constant factor is typically 0.03 to 0.1, Failure probability typically 0.01 to 0.5.
     pub fn new(k: usize, c: f64, delta: f64) -> Self {
         // R = c*ln(K/δ)*√K
-        let mut r = (c * (k as f64 / delta).ln() * (k as f64).sqrt()).round() as usize;
-        if r == 0 {
-            r = 1
+        let mut r = c * (k as f64 / delta).ln() * (k as f64).sqrt();
+        if r < 1.0 {
+            r = 1.0
         };
 
         let mut distribution = Self {
@@ -87,10 +87,10 @@ impl RobustSoliton {
         let mut pmf = vec![0.0; k + 1];
 
         // Dirac spike
-        for d in 1..(k / r) {
-            pmf[d] += 1.0 / (d as f64 * r as f64);
+        for d in 1..(k / r as usize) {
+            pmf[d] += 1.0 / (d as f64 * r);
         }
-        pmf[k / r] = (r as f64 / k as f64) * (r as f64 / delta).ln();
+        pmf[k / r as usize] = (r / k as f64) * (r / delta).ln();
 
         // Combine ideal soliton with Dirac spike
         for i in 1..=k {
@@ -195,11 +195,12 @@ mod tests {
 
         // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
         assert_eq!(
-            distribution.r, 244,
+            distribution.r.round(),
+            244.0,
             "R for k=10000, c=0.2, delta=0.05 is not correct"
         );
         assert_eq!(
-            (k as f64 / distribution.r as f64).round(),
+            (k as f64 / distribution.r).round(),
             41.0,
             "k/R for k=10000, c=0.2, delta=0.05 is not correct"
         );
@@ -240,14 +241,15 @@ mod tests {
 
         // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
         assert_eq!(
-            distribution.r, 10,
+            distribution.r.round(),
+            10.0,
             "R for k=10000, c=0.01, delta=0.5 is not correct"
         );
-        // assert_eq!(
-        //     (k as f64 / distribution.r as f64).round(),
-        //     1010.0,
-        //     "k/R for k=10000, c=0.01, delta=0.5 is not correct"
-        // );
+        assert_eq!(
+            (k as f64 / distribution.r).round(),
+            1010.0,
+            "k/R for k=10000, c=0.01, delta=0.5 is not correct"
+        );
         // assert!(
         //     distribution.beta < 1.01,
         //     "beta={} for k=10000, c=0.01, delta=0.5 is not correct",
@@ -285,14 +287,15 @@ mod tests {
 
         // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
         assert_eq!(
-            distribution.r, 30,
+            distribution.r.round(),
+            30.0,
             "R for k=10000, c=0.03, delta=0.5 is not correct"
         );
-        // assert_eq!(
-        //     (k as f64 / distribution.r as f64).round(),
-        //     337.0,
-        //     "k/R for k=10000, c=0.03, delta=0.5 is not correct"
-        // );
+        assert_eq!(
+            (k as f64 / distribution.r).round(),
+            337.0,
+            "k/R for k=10000, c=0.03, delta=0.5 is not correct"
+        );
         // assert!(
         //     distribution.beta < 1.03,
         //     "beta={} for k=10000, c=0.03, delta=0.5 is not correct",
@@ -330,11 +333,12 @@ mod tests {
 
         // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
         assert_eq!(
-            distribution.r, 99,
+            distribution.r.round(),
+            99.0,
             "R for k=10000, c=0.1, delta=0.5 is not correct"
         );
         assert_eq!(
-            (k as f64 / distribution.r as f64).round(),
+            (k as f64 / distribution.r).round(),
             101.0,
             "k/R for k=10000, c=0.1, delta=0.5 is not correct"
         );
