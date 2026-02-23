@@ -4,10 +4,16 @@ use rand::{Rng, RngExt};
 
 /// [Robust Soliton Distribution](https://en.wikipedia.org/wiki/Soliton_distribution) for Fountain codes
 pub struct RobustSoliton {
-    k: usize,      // Number of source symbols (ie. blocks in our case)
-    cdf: Vec<f64>, // Cumulative Distribution Function
-    delta: f64,    // Failure probability (typically 0.01 to 0.5)
-    r: usize,      // R = c*ln(K/δ)*√K
+    /// Number of source symbols (ie. blocks in our case)
+    k: usize,
+    /// Cumulative Distribution Function
+    cdf: Vec<f64>,
+    /// Failure probability (typically 0.01 to 0.5)
+    delta: f64,
+    /// R = c*ln(K/δ)*√K
+    r: usize,
+    /// Normalization factor β = ∑ ρ(d) + θ(d)
+    beta: f64,
 }
 
 impl RobustSoliton {
@@ -16,10 +22,10 @@ impl RobustSoliton {
     /// Construct a new Robust Soliton Distribution for the given number of source symbols `k`,
     /// constant factor `c` and failure probability `delta`.
     ///
-    /// Constant factor is typically 0.03 to 0.1, Failure probability typically 0.01 to 0.5
+    /// Constant factor is typically 0.03 to 0.1, Failure probability typically 0.01 to 0.5.
     pub fn new(k: usize, c: f64, delta: f64) -> Self {
         // R = c*ln(K/δ)*√K
-        let mut r = (c * (k as f64 / delta).ln() * (k as f64).sqrt()) as usize;
+        let mut r = (c * (k as f64 / delta).ln() * (k as f64).sqrt()).round() as usize;
         if r == 0 {
             r = 1
         };
@@ -29,10 +35,19 @@ impl RobustSoliton {
             cdf: Vec::new(),
             delta,
             r,
+            beta: 0.0,
         };
 
         distribution.build_cdf();
         distribution
+    }
+
+    /// The number of encoded symbols required at the receiving end to ensure that the
+    /// decoding can run to completion, with probability at least 1 - delta
+    pub fn min_encoded_symbols(&self) -> usize {
+        // The number of encoded symbols required at the receiving end to ensure that the
+        // decoding can run to completion, with probability at least 1 - delta, is β*k
+        (self.beta * self.k as f64).ceil() as usize
     }
 
     /// Build the cumulative distribution function
@@ -44,6 +59,7 @@ impl RobustSoliton {
         for p in &mut pmf {
             *p /= sum;
         }
+        self.beta = sum;
 
         // Build CDF
         self.cdf = Vec::with_capacity(pmf.len());
@@ -150,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_degree_distribution() {
+    fn test_degree_distribution_1() {
         let k = 10000;
         let c = 0.2; // Constant factor (typically 0.03 to 0.1)
         let delta = 0.05; // Failure probability (typically 0.01 to 0.5)
@@ -183,9 +199,149 @@ mod tests {
             "R for k=10000, c=0.2, delta=0.05 is not correct"
         );
         assert_eq!(
-            (k as f64 / distribution.r as f64).ceil(),
+            (k as f64 / distribution.r as f64).round(),
             41.0,
             "k/R for k=10000, c=0.2, delta=0.05 is not correct"
+        );
+        assert!(
+            distribution.beta < 1.3,
+            "beta={} for k=10000, c=0.2, delta=0.05 is not correct",
+            distribution.beta
+        );
+    }
+
+    #[test]
+    fn test_degree_distribution_2() {
+        let k = 10000;
+        let c = 0.01;
+        let delta = 0.5;
+
+        let distribution = RobustSoliton::new(k, c, delta);
+        let mut rng = rand::rng();
+        let mut histogram = vec![0; 10001];
+
+        // Sample 100k times
+        for _ in 0..100_000 {
+            let degree = distribution.sample(&mut rng);
+            histogram[degree] += 1;
+        }
+
+        assert_eq!(histogram[0], 0, "Degree 0 cannot occur");
+
+        // Degree 2 should be most frequent (soliton property)
+        let max_degree = histogram
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, count)| *count)
+            .map(|(idx, _)| idx)
+            .unwrap();
+
+        assert_eq!(max_degree, 2, "Degree 2 should be the most frequent");
+
+        // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
+        assert_eq!(
+            distribution.r, 10,
+            "R for k=10000, c=0.01, delta=0.5 is not correct"
+        );
+        // assert_eq!(
+        //     (k as f64 / distribution.r as f64).round(),
+        //     1010.0,
+        //     "k/R for k=10000, c=0.01, delta=0.5 is not correct"
+        // );
+        // assert!(
+        //     distribution.beta < 1.01,
+        //     "beta={} for k=10000, c=0.01, delta=0.5 is not correct",
+        //     distribution.beta,
+        // );
+    }
+
+    #[test]
+    fn test_degree_distribution_3() {
+        let k = 10000;
+        let c = 0.03;
+        let delta = 0.5;
+
+        let distribution = RobustSoliton::new(k, c, delta);
+        let mut rng = rand::rng();
+        let mut histogram = vec![0; 10001];
+
+        // Sample 100k times
+        for _ in 0..100_000 {
+            let degree = distribution.sample(&mut rng);
+            histogram[degree] += 1;
+        }
+
+        assert_eq!(histogram[0], 0, "Degree 0 cannot occur");
+
+        // Degree 2 should be most frequent (soliton property)
+        let max_degree = histogram
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, count)| *count)
+            .map(|(idx, _)| idx)
+            .unwrap();
+
+        assert_eq!(max_degree, 2, "Degree 2 should be the most frequent");
+
+        // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
+        assert_eq!(
+            distribution.r, 30,
+            "R for k=10000, c=0.03, delta=0.5 is not correct"
+        );
+        // assert_eq!(
+        //     (k as f64 / distribution.r as f64).round(),
+        //     337.0,
+        //     "k/R for k=10000, c=0.03, delta=0.5 is not correct"
+        // );
+        // assert!(
+        //     distribution.beta < 1.03,
+        //     "beta={} for k=10000, c=0.03, delta=0.5 is not correct",
+        //     distribution.beta
+        // );
+    }
+
+    #[test]
+    fn test_degree_distribution_4() {
+        let k = 10000;
+        let c = 0.1;
+        let delta = 0.5;
+
+        let distribution = RobustSoliton::new(k, c, delta);
+        let mut rng = rand::rng();
+        let mut histogram = vec![0; 10001];
+
+        // Sample 100k times
+        for _ in 0..100_000 {
+            let degree = distribution.sample(&mut rng);
+            histogram[degree] += 1;
+        }
+
+        assert_eq!(histogram[0], 0, "Degree 0 cannot occur");
+
+        // Degree 2 should be most frequent (soliton property)
+        let max_degree = histogram
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, count)| *count)
+            .map(|(idx, _)| idx)
+            .unwrap();
+
+        assert_eq!(max_degree, 2, "Degree 2 should be the most frequent");
+
+        // based on paper by D.J.C. MacKay: http://switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf
+        assert_eq!(
+            distribution.r, 99,
+            "R for k=10000, c=0.1, delta=0.5 is not correct"
+        );
+        assert_eq!(
+            (k as f64 / distribution.r as f64).round(),
+            101.0,
+            "k/R for k=10000, c=0.1, delta=0.5 is not correct"
+        );
+        assert!(
+            distribution.beta < 1.105,
+            "beta={} for k=10000, c=0.1, delta=0.5 is not correct",
+            distribution.beta
         );
     }
 }

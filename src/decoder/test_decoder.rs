@@ -141,8 +141,8 @@ mod decoder_tests {
     use super::*;
     use crate::encoder::{distribution::RobustSoliton, test_encoder::TestFountainEncoder};
 
-    const C: f64 = 0.03; // Constant factor (typically 0.03 to 0.1)
-    const DELTA: f64 = 0.02; // Failure probability (typically 0.01 to 0.5)
+    const C: f64 = 0.06; // Constant factor (typically 0.03 to 0.1)
+    const DELTA: f64 = 0.01; // Failure probability (typically 0.01 to 0.5)
 
     #[test]
     fn test_simple_single_symbol_recovery() {
@@ -179,12 +179,13 @@ mod decoder_tests {
         // Encode using FountainEncoder
         let degree_distribution = RobustSoliton::new(k, c, delta);
 
+        // Generate enough encoded symbols to recover all source symbols
+        // With robust soliton, typically need k + overhead symbols
+        let num_encoded = degree_distribution.min_encoded_symbols();
+
         let encoder = TestFountainEncoder::new(source_symbols.clone(), degree_distribution);
         let mut rng = rand::rng();
 
-        // Generate enough encoded symbols to recover all source symbols
-        // With robust soliton, typically need k + overhead symbols
-        let num_encoded = 3 * k;
         let mut encoded_data = Vec::new();
 
         for _ in 0..num_encoded {
@@ -223,11 +224,12 @@ mod decoder_tests {
 
         // Encode
         let degree_distribution = RobustSoliton::new(k, C, DELTA);
+
+        // Generate enough encoded symbols to recover all source symbols (typically need k + small overhead)
+        let num_encoded = degree_distribution.min_encoded_symbols();
+
         let encoder = TestFountainEncoder::new(source_symbols.clone(), degree_distribution);
         let mut rng = rand::rng();
-
-        // Generate encoded symbols (typically need k + small overhead)
-        let num_encoded = (k as f64 * 1.13).ceil() as u64;
 
         let mut encoded_data = Vec::new();
 
