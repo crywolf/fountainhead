@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use bitcoin_consensus_encoding as encoding;
 
 use encoding::{
@@ -23,19 +21,19 @@ pub struct Droplet {
 }
 
 impl Droplet {
-    pub fn new(num: usize, neighbors: Vec<Neighbor>, padded_block: PaddedBlock) -> Result<Self> {
+    pub fn new(num: usize, neighbors: Vec<Neighbor>, padded_block: PaddedBlock) -> Self {
         let block_size = padded_block.block_size;
 
         let data = padded_block.data;
         let data_size = data.len();
 
-        Ok(Self {
+        Self {
             num,
             neighbors,
             block_size,
             data_size,
             data,
-        })
+        }
     }
 
     #[allow(dead_code)]

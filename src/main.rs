@@ -1,7 +1,11 @@
 use std::{env, process};
 
 use anyhow::Result;
-use fountainhead::{blockchain::Blockchain, config::Config};
+use fountainhead::{
+    blockchain::Blockchain,
+    config::Config,
+    encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
+};
 
 /// Number of worker threads for block validation
 const WORKER_THREADS: i32 = 8;
@@ -27,14 +31,22 @@ fn main() -> Result<()> {
     let output_data_dir = args[3].clone();
     let droplets_dir = args[4].clone();
 
+    let epochs_to_encode = 2; // TODO
+    let blocks_per_epoch = 11; // TODO
+
     let config = Config {
         droplets_dir,
         input_data_dir,
         output_data_dir,
         worker_threads: WORKER_THREADS,
+        blocks_per_epoch,
+        epochs_to_encode,
     };
 
-    let blockchain = Blockchain::new(config)?;
+    let degree_distribution = RobustSoliton::new(config.blocks_per_epoch, 0.06, 0.01);
+    let encoder = DummyEncoder::new(degree_distribution);
+
+    let mut blockchain = Blockchain::new(config, encoder)?;
 
     if command == "compress" {
         blockchain.compress()?;
