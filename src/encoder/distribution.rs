@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use rand::{Rng, RngExt};
 
 /// [Robust Soliton Distribution](https://en.wikipedia.org/wiki/Soliton_distribution) for Fountain codes
@@ -17,7 +15,7 @@ pub struct RobustSoliton {
 }
 
 impl RobustSoliton {
-    #![allow(clippy::needless_range_loop)]
+    #![expect(clippy::needless_range_loop)]
 
     /// Construct a new Robust Soliton Distribution for the given number of source symbols `k`,
     /// constant factor `c` and failure probability `delta`.

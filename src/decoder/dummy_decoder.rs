@@ -5,32 +5,32 @@ use bitcoinkernel::Block;
 
 use crate::droplet::Droplet;
 
-/// Dummy decoder does not decode anything, it just deserializes blocks from fake droplets.
+/// Dummy decoder does not decode anything, it just deserializes blocks from dummy droplets.
 /// It is useful only for testing of the surrounding blockchain infrastructure and logic.
 pub struct DummyDecoder {
-    block_data_size: usize, // Size of each block data in droplet in bytes
-    droplets: Vec<Droplet>, // Received encoded symbols
+    droplet_data_size: usize, // Size of each block data in droplet in bytes
+    droplets: Vec<Droplet>,   // Received encoded symbols (droplets)
 }
 
 impl DummyDecoder {
     /// Create a new decoder
     pub fn new() -> Self {
         Self {
-            block_data_size: 0,
+            droplet_data_size: 0,
             droplets: Vec::new(),
         }
     }
 
     /// Add a droplet
     pub fn add_droplet(&mut self, droplet: Droplet) -> Result<()> {
-        if self.block_data_size == 0 {
-            self.block_data_size = droplet.data_size;
+        if self.droplet_data_size == 0 {
+            self.droplet_data_size = droplet.data_size();
         }
-        if droplet.data_size != self.block_data_size {
+        if droplet.data_size() != self.droplet_data_size {
             bail!(
-                "Block size mismatch: expected {}, got {}",
-                self.block_data_size,
-                droplet.data_size
+                "Block size mismatch in droplet decoder: expected {}, got {}",
+                self.droplet_data_size,
+                droplet.data_size()
             );
         }
 
@@ -39,19 +39,20 @@ impl DummyDecoder {
         Ok(())
     }
 
-    /// Decode all droplets and put them into provided blocks queue (BTreeMap indexed and ordered by block height)
-    pub fn decode(&mut self, recovered_blocks: &mut BTreeMap<usize, Block>) -> Result<()> {
+    /// Decode all droplets and put decoded blocks into provided blocks queue (BTreeMap indexed and ordered by droplet number)
+    pub fn decode(&mut self, recovered_blocks: &mut BTreeMap<usize, Vec<Block>>) -> Result<()> {
         for droplet in &self.droplets {
             println!(
-                "<- reconstructed #{}; neighbors: {:?}, droplet: {} bytes, block: {} bytes",
-                droplet.num, droplet.neighbors, droplet.data_size, droplet.block_size
+                "<- decoded droplet #{}; neighbors: {:?}, droplet data: {} bytes",
+                droplet.num,
+                droplet.neighbors,
+                droplet.data_size(),
             );
 
-            let block =
-                Block::new(droplet.as_block_bytes()).context("new block from droplet bytes")?;
+            let blocks = droplet.to_blocks().context("get blocks from droplet")?;
 
             // add to queue
-            recovered_blocks.insert(droplet.num, block);
+            recovered_blocks.insert(droplet.num, blocks);
         }
 
         Ok(())

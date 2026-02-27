@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, fs};
 
 use anyhow::{Context as _, Result};
-use bitcoin_consensus_encoding as encoding;
 use bitcoinkernel::{
     ChainType, ChainstateManager, ChainstateManagerBuilder, ContextBuilder, ProcessBlockResult,
 };
@@ -12,7 +11,7 @@ use crate::{
     decoder::dummy_decoder::DummyDecoder,
     droplet::Droplet,
     encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
-    padded_block::PaddedBlock,
+    super_block::{DEFAULT_SUPERBLOCK_SIZE, SuperBlock},
 };
 
 pub struct Blockchain {
@@ -60,6 +59,8 @@ impl Blockchain {
         })
     }
 
+    // TODO separate compressor and decompressor
+
     pub fn compress(&mut self) -> Result<()> {
         let blocks_per_epoch = self.config.blocks_per_epoch;
         let encoder = &mut self.encoder;
@@ -72,7 +73,7 @@ impl Blockchain {
 
             fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
 
-            // determine max block size for padding
+            // first we need to know max block size in epoch for blocks concatenation and padding
             let mut max_block_size = 0;
             for entry in chain
                 .iter()
@@ -84,13 +85,16 @@ impl Blockchain {
                     .inner
                     .read_block_data(&entry)
                     .context("read block data")?;
+                // Isn't there a better way to get the block size??
                 let block_size = block.consensus_encode()?.len();
                 if block_size > max_block_size {
                     max_block_size = block_size;
                 }
             }
 
-            let mut source_blocks = Vec::new();
+            let superblock_size = std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size);
+
+            let mut super_blocks = Vec::new();
             for entry in chain
                 .iter()
                 .skip(epoch * blocks_per_epoch)
@@ -107,21 +111,24 @@ impl Blockchain {
                     .read_block_data(&entry)
                     .context("read block data")?;
 
-                // adaptive zero-padding
-                let padded_block =
-                    PaddedBlock::new(block, max_block_size).context("create padded block")?;
+                // TODO MORE BLOCKS in superblock
 
-                source_blocks.push(padded_block);
+                let mut superblock = SuperBlock::new(superblock_size);
+                superblock
+                    .add(block)
+                    .context("adding block to super block")?;
+
+                super_blocks.push(superblock);
             }
 
             // TODO decide what to do with the last (incomplete) epoch
-            assert_eq!(
-                blocks_per_epoch,
-                source_blocks.len(),
-                "Not enough blocks per epoch"
-            );
+            // assert_eq!(
+            //     blocks_per_epoch,
+            //     super_blocks.len(),
+            //     "Not enough blocks per epoch"
+            // );
 
-            encoder.init_epoch(epoch, source_blocks);
+            encoder.init_epoch(epoch, super_blocks);
             let mut rng = rand::rng();
 
             for num in 0..blocks_per_epoch {
@@ -129,14 +136,13 @@ impl Blockchain {
                     .generate_droplet(&mut rng)
                     .with_context(|| format!("generate droplet {}", num))?;
 
-                let encoded_droplet = encoding::encode_to_vec(&droplet);
+                let encoded_droplet = droplet.encode_to_bytes();
 
                 println!(
-                    "-> droplet: {}, size: {}, encoded: {} bytes, block: {} bytes",
+                    "-> droplet: {}, superblock size: {}, encoded: {} bytes",
                     droplet.num,
-                    droplet.data_size,
+                    droplet.data_size(),
                     encoded_droplet.len(),
-                    droplet.block_size,
                 );
 
                 let droplet_filename = format!("{:06}", droplet.num);
@@ -176,31 +182,41 @@ impl Blockchain {
                     format!("read droplet file {}", droplet_file_path.display())
                 })?;
 
-                let droplet: Droplet = encoding::decode_from_slice(&encoded_droplet)
+                let droplet = Droplet::decode_from_bytes(&encoded_droplet)
                     .context("decode droplet from file bytes")?;
 
-                decoder.add_droplet(droplet)?;
+                decoder
+                    .add_droplet(droplet)
+                    .context("add droplet to decoder")?;
             }
 
             let mut recovered_blocks = BTreeMap::new();
 
             decoder
                 .decode(&mut recovered_blocks)
-                .context("decode droplet")?;
+                .context("fountain decoder: recover blocks from droplets")?;
 
             println!("-----");
 
-            // process queued blocks
-            for (i, block) in recovered_blocks.iter() {
-                match self.out_chainman.inner.process_block(block) {
-                    ProcessBlockResult::NewBlock => {
-                        println!("<  Reconstructed block {i} validated and written to disk")
-                    }
-                    ProcessBlockResult::Duplicate => {
-                        println!("<  Reconstructed block {i} already known (valid)")
-                    }
-                    ProcessBlockResult::Rejected => {
-                        println!("!!! Reconstructed block {i} validation failed !!!")
+            // process queued super blocks
+            for (num, blocks) in recovered_blocks.iter() {
+                for (i, block) in blocks.iter().enumerate() {
+                    match self.out_chainman.inner.process_block(block) {
+                        ProcessBlockResult::NewBlock => {
+                            println!(
+                                "<  Droplet #{num}: block #{i} from superblock validated and written to disk"
+                            )
+                        }
+                        ProcessBlockResult::Duplicate => {
+                            println!(
+                                "<  Droplet #{num}: block #{i} from superblock already known (valid)"
+                            )
+                        }
+                        ProcessBlockResult::Rejected => {
+                            println!(
+                                "!!! Droplet #{num}: block #{i} from superblock validation failed !!!"
+                            )
+                        }
                     }
                 }
             }

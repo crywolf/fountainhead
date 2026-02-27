@@ -3,4 +3,4 @@ pub mod config;
 pub mod decoder;
 mod droplet;
 pub mod encoder;
-mod padded_block;
+mod super_block;

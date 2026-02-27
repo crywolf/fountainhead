@@ -1,5 +1,5 @@
 #![cfg(test)]
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::collections::HashMap;
 
