@@ -68,6 +68,7 @@ impl Blockchain {
         let chain = self.in_chainman.inner.active_chain();
 
         for epoch in 0..self.config.epochs_to_encode {
+            // iterating over all requested epochs
             println!("--- EPOCH {epoch} ---");
             let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
 
@@ -86,39 +87,83 @@ impl Blockchain {
                     .read_block_data(&entry)
                     .context("read block data")?;
                 // Isn't there a better way to get the block size??
+                // TODO - make a lookup table?
                 let block_size = block.consensus_encode()?.len();
                 if block_size > max_block_size {
                     max_block_size = block_size;
                 }
             }
 
-            let superblock_size = std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size);
+            // Superblock size must be at least size of the largest block in epoch
+            // We also need to encode number of blocks in the vector and the total number of bytes, so we add some overhead
+            let superblock_size =
+                std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size + 2 * 5 + 1);
+
+            println!(
+                "SUPER BLOCK SIZE: {} | max_block_size: {}",
+                superblock_size, max_block_size
+            );
 
             let mut super_blocks = Vec::new();
-            for entry in chain
+            let mut superblock = SuperBlock::new(superblock_size);
+            for (height, entry) in chain
                 .iter()
+                .enumerate()
                 .skip(epoch * blocks_per_epoch)
                 .take(blocks_per_epoch)
             {
-                println!(
-                    ">  Reading block {} at height {}",
-                    entry.block_hash(),
-                    entry.height()
-                );
+                // iterating over blocks in epoch
                 let block = self
                     .in_chainman
                     .inner
                     .read_block_data(&entry)
                     .context("read block data")?;
 
-                // TODO MORE BLOCKS in superblock
+                // TODO use lookup table
+                let block_size = block.consensus_encode()?.len();
+                use bitcoin_consensus_encoding::Encoder;
+                let size_encoder = bitcoin_consensus_encoding::CompactSizeEncoder::new(block_size);
+                let block_size = block_size + size_encoder.current_chunk().len();
 
-                let mut superblock = SuperBlock::new(superblock_size);
-                superblock
-                    .add(block)
-                    .context("adding block to super block")?;
+                println!(
+                    "superblock.size() {}, block_size {}, superblock_size {}",
+                    superblock.len(),
+                    block_size,
+                    superblock_size
+                );
+                if superblock.len() + block_size < superblock_size {
+                    // block fits in superblock => add it
+                    println!("  adding block {} to super block", height);
+                    superblock
+                        .add(block)
+                        .context("adding block to super block")?;
+                } else {
+                    // block does not fit => start new superblock
+                    println!(
+                        "-- closing current super block with {} blocks",
+                        superblock.block_count()
+                    );
 
-                super_blocks.push(superblock);
+                    super_blocks.push(superblock);
+
+                    println!(">> starting new super block");
+                    superblock = SuperBlock::new(superblock_size);
+                    println!("  adding block {} to super block", height);
+                    superblock
+                        .add(block)
+                        .context("adding block to super block")?;
+                }
+                if (height + 1).is_multiple_of(blocks_per_epoch) {
+                    // last block in epoch, add superblock to collection of superblocks
+                    println!(
+                        "== last block in epoch {} => closing current super block, block {}, total {} blocks",
+                        epoch,
+                        height,
+                        superblock.block_count()
+                    );
+                    super_blocks.push(superblock);
+                    break;
+                }
             }
 
             // TODO decide what to do with the last (incomplete) epoch
@@ -127,11 +172,12 @@ impl Blockchain {
             //     super_blocks.len(),
             //     "Not enough blocks per epoch"
             // );
+            let super_blocks_len = super_blocks.len();
 
             encoder.init_epoch(epoch, super_blocks);
             let mut rng = rand::rng();
 
-            for num in 0..blocks_per_epoch {
+            for num in 0..super_blocks_len {
                 let droplet = encoder
                     .generate_droplet(&mut rng)
                     .with_context(|| format!("generate droplet {}", num))?;
@@ -145,7 +191,7 @@ impl Blockchain {
                     encoded_droplet.len(),
                 );
 
-                let droplet_filename = format!("{:06}", droplet.num);
+                let droplet_filename = format!("{:06}", num);
                 let droplet_file_path = format!("{}/drp{}.dat", epoch_dir, droplet_filename);
                 fs::write(droplet_file_path, encoded_droplet)?;
             }
@@ -204,17 +250,17 @@ impl Blockchain {
                     match self.out_chainman.inner.process_block(block) {
                         ProcessBlockResult::NewBlock => {
                             println!(
-                                "<  Droplet #{num}: block #{i} from superblock validated and written to disk"
+                                "<  Droplet #{num}: block #{i:<2} from superblock validated and written to disk"
                             )
                         }
                         ProcessBlockResult::Duplicate => {
                             println!(
-                                "<  Droplet #{num}: block #{i} from superblock already known (valid)"
+                                "<  Droplet #{num}: block #{i:<2} from superblock already known (valid)"
                             )
                         }
                         ProcessBlockResult::Rejected => {
                             println!(
-                                "!!! Droplet #{num}: block #{i} from superblock validation failed !!!"
+                                "!!! Droplet #{num}: block #{i:<2} from superblock validation failed !!!"
                             )
                         }
                     }

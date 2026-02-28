@@ -1,13 +1,17 @@
 use anyhow::{Context, Result};
-use bitcoin_consensus_encoding::{self as encoding, ByteVecDecoder, Encoder, VecDecoder};
+use bitcoin_consensus_encoding as encoding;
 use bitcoinkernel::Block;
-use encoding::{BytesEncoder, CompactSizeEncoder, Decodable, Decoder, Encodable, Encoder2};
 
-pub const DEFAULT_SUPERBLOCK_SIZE: usize = 1024;
+use encoding::{
+    ByteVecDecoder, BytesEncoder, CompactSizeEncoder, Decodable, Decoder, Encodable, Encoder,
+    Encoder2, VecDecoder,
+};
+
+pub const DEFAULT_SUPERBLOCK_SIZE: usize = 10 * 1024; // TODO !!!!
 
 /// SuperBlock represents concatenated blocks (with padding)
 pub struct SuperBlock {
-    padding_limit: usize,
+    padded_size: usize,
     /// Number of blocks included in this superblock
     block_count: usize,
     /// Concatenated consensus-encoded blocks
@@ -15,9 +19,9 @@ pub struct SuperBlock {
 }
 
 impl SuperBlock {
-    pub fn new(padding_limit: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         Self {
-            padding_limit,
+            padded_size: size,
             block_count: 0,
             encoded_blocks_bytes: Vec::with_capacity(DEFAULT_SUPERBLOCK_SIZE),
         }
@@ -26,6 +30,7 @@ impl SuperBlock {
     pub fn add(&mut self, block: Block) -> Result<()> {
         let block_bytes = encoding::encode_to_vec(&EncodableBlock::new(block));
 
+        // block bytes prefixed with compact-size length
         self.encoded_blocks_bytes.extend_from_slice(&block_bytes);
 
         self.block_count += 1;
@@ -33,18 +38,19 @@ impl SuperBlock {
         Ok(())
     }
 
+    /// Byte length of currently encoded blocks in superblock
     pub fn len(&self) -> usize {
         // Add a reserve to encode compact-size length of the whole bytes vector.
         // 5 bytes is maximum realistic length of compact-size encoded number,
         // 5 bytes compact size can encode 65536 - 4294967295
-        // Wee need to encode number of blocks in the vector and the total number of bytes.
+        // We need to encode number of blocks in the vector and the total number of bytes.
         self.encoded_blocks_bytes.len() + 2 * 5
     }
 
     /// Add padding at the end of concatenated block bytes and consensus-encode them
     pub fn into_encoded_bytes(mut self) -> Vec<u8> {
         // encode as a vector of bytes with items count at the beginning
-        let mut encoded_blocks_vec_with_count = Vec::with_capacity(self.len());
+        let mut encoded_blocks_vec_with_count = Vec::with_capacity(self.padded_size);
 
         let count_encoder = CompactSizeEncoder::new(self.block_count);
         let encoded_block_count = count_encoder.current_chunk();
@@ -53,11 +59,22 @@ impl SuperBlock {
         encoded_blocks_vec_with_count.append(&mut self.encoded_blocks_bytes);
 
         // adaptive zero-padding
-        let padding_length = self.padding_limit - encoded_blocks_vec_with_count.len();
+        debug_assert!(
+            self.padded_size >= encoded_blocks_vec_with_count.len(),
+            "superblock size too small - padding_limit: {}, encoded_blocks_vec_with_count.len(): {}",
+            self.padded_size,
+            encoded_blocks_vec_with_count.len()
+        );
+
+        let padding_length = self.padded_size - encoded_blocks_vec_with_count.len();
 
         encoded_blocks_vec_with_count.append(&mut vec![0u8; padding_length]);
 
         encoded_blocks_vec_with_count
+    }
+
+    pub fn block_count(&self) -> usize {
+        self.block_count
     }
 }
 

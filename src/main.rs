@@ -31,8 +31,11 @@ fn main() -> Result<()> {
     let output_data_dir = args[3].clone();
     let droplets_dir = args[4].clone();
 
-    let epochs_to_encode = 3; // TODO
-    let blocks_per_epoch = 11; // TODO
+    // let epochs_to_encode = 3; // TODO
+    // let blocks_per_epoch = 11; // TODO
+
+    let epochs_to_encode = 1001; // TODO
+    let blocks_per_epoch = 201; // TODO
 
     let config = Config {
         droplets_dir,
