@@ -61,7 +61,7 @@ impl SuperBlock {
         // adaptive zero-padding
         debug_assert!(
             self.padded_size >= encoded_blocks_vec_with_count.len(),
-            "superblock size too small - padding_limit: {}, encoded_blocks_vec_with_count.len(): {}",
+            "superblock size too small - padded_size: {}, encoded_blocks_vec_with_count.len(): {}",
             self.padded_size,
             encoded_blocks_vec_with_count.len()
         );

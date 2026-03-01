@@ -11,6 +11,8 @@ use fountainhead::{
 const WORKER_THREADS: i32 = 8;
 
 fn main() -> Result<()> {
+    setup_logging();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 5 {
@@ -31,11 +33,11 @@ fn main() -> Result<()> {
     let output_data_dir = args[3].clone();
     let droplets_dir = args[4].clone();
 
-    // let epochs_to_encode = 3; // TODO
-    // let blocks_per_epoch = 11; // TODO
+    // let epochs_to_encode = 2; // TODO
+    // let blocks_per_epoch = 100; // TODO
 
-    let epochs_to_encode = 1001; // TODO
-    let blocks_per_epoch = 201; // TODO
+    let epochs_to_encode = 250; // TODO
+    let blocks_per_epoch = 1000; // TODO
 
     let config = Config {
         droplets_dir,
@@ -58,4 +60,10 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn setup_logging() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_timestamp(None)
+        .init();
 }

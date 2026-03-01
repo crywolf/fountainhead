@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{
     ChainType, ChainstateManager, ChainstateManagerBuilder, ContextBuilder, ProcessBlockResult,
 };
@@ -44,10 +44,8 @@ impl Blockchain {
         ///////////////////////
 
         let chain = in_chainman.inner.active_chain();
-        println!("Initializing blockchain reader");
-        println!("Active chain height: {}", chain.height());
-
-        println!("-----");
+        log::info!("Initializing blockchain reader");
+        log::info!("Active chain height: {}", chain.height());
 
         ///////////////////////
 
@@ -62,6 +60,12 @@ impl Blockchain {
     // TODO separate compressor and decompressor
 
     pub fn compress(&mut self) -> Result<()> {
+        log::info!(
+            "Starting compression of {} epochs, total {} blocks",
+            self.config.epochs_to_encode,
+            self.config.epochs_to_encode * self.config.blocks_per_epoch
+        );
+
         let blocks_per_epoch = self.config.blocks_per_epoch;
         let encoder = &mut self.encoder;
 
@@ -69,9 +73,9 @@ impl Blockchain {
 
         for epoch in 0..self.config.epochs_to_encode {
             // iterating over all requested epochs
-            println!("--- EPOCH {epoch} ---");
-            let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
+            log::info!("Compressing epoch {epoch}");
 
+            let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
             fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
 
             // first we need to know max block size in epoch for blocks concatenation and padding
@@ -99,9 +103,10 @@ impl Blockchain {
             let superblock_size =
                 std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size + 2 * 5 + 1);
 
-            println!(
+            log::debug!(
                 "SUPER BLOCK SIZE: {} | max_block_size: {}",
-                superblock_size, max_block_size
+                superblock_size,
+                max_block_size
             );
 
             let mut super_blocks = Vec::new();
@@ -113,6 +118,7 @@ impl Blockchain {
                 .take(blocks_per_epoch)
             {
                 // iterating over blocks in epoch
+
                 let block = self
                     .in_chainman
                     .inner
@@ -125,7 +131,7 @@ impl Blockchain {
                 let size_encoder = bitcoin_consensus_encoding::CompactSizeEncoder::new(block_size);
                 let block_size = block_size + size_encoder.current_chunk().len();
 
-                println!(
+                log::debug!(
                     "superblock.size() {}, block_size {}, superblock_size {}",
                     superblock.len(),
                     block_size,
@@ -133,29 +139,29 @@ impl Blockchain {
                 );
                 if superblock.len() + block_size < superblock_size {
                     // block fits in superblock => add it
-                    println!("  adding block {} to super block", height);
+                    log::debug!("  adding block {} to super block", height);
                     superblock
                         .add(block)
                         .context("adding block to super block")?;
                 } else {
                     // block does not fit => start new superblock
-                    println!(
+                    log::debug!(
                         "-- closing current super block with {} blocks",
                         superblock.block_count()
                     );
 
                     super_blocks.push(superblock);
 
-                    println!(">> starting new super block");
+                    log::debug!(">> starting new super block");
                     superblock = SuperBlock::new(superblock_size);
-                    println!("  adding block {} to super block", height);
+                    log::debug!("  adding block {} to super block", height);
                     superblock
                         .add(block)
                         .context("adding block to super block")?;
                 }
                 if (height + 1).is_multiple_of(blocks_per_epoch) {
                     // last block in epoch, add superblock to collection of superblocks
-                    println!(
+                    log::debug!(
                         "== last block in epoch {} => closing current super block, block {}, total {} blocks",
                         epoch,
                         height,
@@ -177,6 +183,7 @@ impl Blockchain {
             encoder.init_epoch(epoch, super_blocks);
             let mut rng = rand::rng();
 
+            log::info!("Generating droplets for epoch {}", epoch);
             for num in 0..super_blocks_len {
                 let droplet = encoder
                     .generate_droplet(&mut rng)
@@ -184,7 +191,7 @@ impl Blockchain {
 
                 let encoded_droplet = droplet.encode_to_bytes();
 
-                println!(
+                log::debug!(
                     "-> droplet: {}, superblock size: {}, encoded: {} bytes",
                     droplet.num,
                     droplet.data_size(),
@@ -197,12 +204,15 @@ impl Blockchain {
             }
         }
 
+        log::info!("All droplets were successfully created");
+
         Ok(())
     }
 
     pub fn restore(&self) -> Result<()> {
         for epoch in 0..self.config.epochs_to_encode {
-            println!("--- EPOCH {epoch} ---");
+            log::info!("Restoring epoch {epoch}");
+
             let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
 
             let mut droplet_files = fs::read_dir(&epoch_dir)
@@ -242,25 +252,26 @@ impl Blockchain {
                 .decode(&mut recovered_blocks)
                 .context("fountain decoder: recover blocks from droplets")?;
 
-            println!("-----");
-
             // process queued super blocks
             for (num, blocks) in recovered_blocks.iter() {
                 for (i, block) in blocks.iter().enumerate() {
                     match self.out_chainman.inner.process_block(block) {
                         ProcessBlockResult::NewBlock => {
-                            println!(
+                            log::debug!(
                                 "<  Droplet #{num}: block #{i:<2} from superblock validated and written to disk"
                             )
                         }
                         ProcessBlockResult::Duplicate => {
-                            println!(
+                            log::debug!(
                                 "<  Droplet #{num}: block #{i:<2} from superblock already known (valid)"
                             )
                         }
                         ProcessBlockResult::Rejected => {
-                            println!(
-                                "!!! Droplet #{num}: block #{i:<2} from superblock validation failed !!!"
+                            log::error!(
+                                "!! Droplet #{num}: block #{i:<2} from superblock validation failed!"
+                            );
+                            bail!(
+                                "Droplet #{num}: block #{i:<2} from superblock validation failed!"
                             )
                         }
                     }
@@ -269,17 +280,16 @@ impl Blockchain {
         }
 
         ///////////////////////
-
-        println!("-----");
+        log::info!("All blocks from droplets were successfully restored");
 
         let out_chain = self.out_chainman.inner.active_chain();
 
         // Get the reconstructed tip
         let tip = out_chain.tip();
-        println!("Reconstructed chain height: {}", out_chain.height());
-        println!("Reconstructed tip hash: {}", tip.block_hash());
+        log::info!("Reconstructed chain height: {}", out_chain.height());
+        log::info!("Reconstructed tip hash: {}", tip.block_hash());
         let block = self.out_chainman.inner.read_block_data(&tip)?;
-        println!(
+        log::info!(
             "Transactions count in the last reconstructed block: {}",
             block.transaction_count()
         );

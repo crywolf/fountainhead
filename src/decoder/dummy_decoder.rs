@@ -42,7 +42,7 @@ impl DummyDecoder {
     /// Decode all droplets and put decoded blocks into provided blocks queue (BTreeMap indexed and ordered by droplet number)
     pub fn decode(&mut self, recovered_blocks: &mut BTreeMap<usize, Vec<Block>>) -> Result<()> {
         for droplet in &self.droplets {
-            println!(
+            log::debug!(
                 "<- decoded droplet #{}; neighbors: {:?}, droplet data: {} bytes",
                 droplet.num,
                 droplet.neighbors,
