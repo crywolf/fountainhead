@@ -79,7 +79,7 @@ impl Blockchain {
             fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
 
             // first we need to know max block size in epoch for blocks concatenation and padding
-            let mut max_block_size = 0;
+            let mut max_block_size_in_epoch = 0;
             for entry in chain
                 .iter()
                 .skip(epoch * blocks_per_epoch)
@@ -93,24 +93,24 @@ impl Blockchain {
                 // Isn't there a better way to get the block size??
                 // TODO - make a lookup table?
                 let block_size = block.consensus_encode()?.len();
-                if block_size > max_block_size {
-                    max_block_size = block_size;
+                if block_size > max_block_size_in_epoch {
+                    max_block_size_in_epoch = block_size;
                 }
             }
 
-            // Superblock size must be at least size of the largest block in epoch
+            // Superblock size must be at least the size of the largest block in epoch
             // We also need to encode number of blocks in the vector and the total number of bytes, so we add some overhead
-            let superblock_size =
-                std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size + 2 * 5 + 1);
+            let max_superblock_size =
+                std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size_in_epoch + 2 * 5 + 1);
 
-            log::debug!(
-                "SUPER BLOCK SIZE: {} | max_block_size: {}",
-                superblock_size,
-                max_block_size
+            log::info!(
+                "Max superblock size: {} | max_block_size_in_epoch: {}",
+                max_superblock_size,
+                max_block_size_in_epoch
             );
 
             let mut super_blocks = Vec::new();
-            let mut superblock = SuperBlock::new(superblock_size);
+            let mut superblock = SuperBlock::new();
             for (height, entry) in chain
                 .iter()
                 .enumerate()
@@ -132,12 +132,11 @@ impl Blockchain {
                 let block_size = block_size + size_encoder.current_chunk().len();
 
                 log::debug!(
-                    "superblock.size() {}, block_size {}, superblock_size {}",
-                    superblock.len(),
+                    "current superblock len {}, block_size {}",
+                    superblock.size(),
                     block_size,
-                    superblock_size
                 );
-                if superblock.len() + block_size < superblock_size {
+                if superblock.size() + block_size < max_superblock_size {
                     // block fits in superblock => add it
                     log::debug!("  adding block {} to super block", height);
                     superblock
@@ -153,7 +152,7 @@ impl Blockchain {
                     super_blocks.push(superblock);
 
                     log::debug!(">> starting new super block");
-                    superblock = SuperBlock::new(superblock_size);
+                    superblock = SuperBlock::new();
                     log::debug!("  adding block {} to super block", height);
                     superblock
                         .add(block)
@@ -162,7 +161,7 @@ impl Blockchain {
                 if (height + 1).is_multiple_of(blocks_per_epoch) {
                     // last block in epoch, add superblock to collection of superblocks
                     log::debug!(
-                        "== last block in epoch {} => closing current super block, block {}, total {} blocks",
+                        "== last block in epoch {} => closing current super block, block {}, total {} superblocks",
                         epoch,
                         height,
                         superblock.block_count()
@@ -183,7 +182,11 @@ impl Blockchain {
             encoder.init_epoch(epoch, super_blocks);
             let mut rng = rand::rng();
 
-            log::info!("Generating droplets for epoch {}", epoch);
+            log::info!(
+                "Generating droplets for epoch {} with {} superblocks",
+                epoch,
+                super_blocks_len
+            );
             for num in 0..super_blocks_len {
                 let droplet = encoder
                     .generate_droplet(&mut rng)

@@ -19,6 +19,8 @@ where
     k: usize,
     /// Source data
     super_blocks: VecDeque<SuperBlock>,
+    /// Maximum size of a superblock in an epoch, used for adaptive padding
+    max_superblock_size_in_epoch: usize,
     /// What superblock is currently being processed
     position: usize,
     // Not used. Only for trait compatibility.
@@ -34,6 +36,7 @@ where
             epoch: 0,
             k: 0,
             super_blocks: VecDeque::default(),
+            max_superblock_size_in_epoch: 0,
             position: 0,
             _degree_distribution: degree_distribution,
         }
@@ -44,22 +47,31 @@ where
         self.epoch = epoch;
         self.k = super_blocks.len();
         self.super_blocks = VecDeque::from(super_blocks);
+
+        // find max superblock size in the epoch for padding
+        for sb in self.super_blocks.iter() {
+            let superblock_size = sb.size();
+            if superblock_size > self.max_superblock_size_in_epoch {
+                self.max_superblock_size_in_epoch = superblock_size;
+            }
+        }
     }
 
-    /// Generate a fake droplet containing next block from the source blocks
+    /// Generate a fake droplet containing next superblock from the superblocks
     pub fn generate_droplet<R: Rng>(&mut self, _rng: &mut R) -> Result<Droplet> {
         let neighbors = vec![Neighbor::new(self.position)];
 
-        let droplet = Droplet::new(
+        let mut superblock = self.super_blocks.pop_front().ok_or(anyhow::anyhow!(
+            "Encoding superblock {} (from {} total) failed. (No more source blocks for epoch {} left. Have you called init_epoch()?)",
             self.position,
-            neighbors,
-            self.super_blocks.pop_front().ok_or(anyhow::anyhow!(
-                "Encoding superblock {} (from {} total) failed. (No more source blocks for epoch {} left. Have you called init_epoch()?)",
-                self.position,
-                self.k,
-                self.epoch,
-            ))?,
-        );
+            self.k,
+            self.epoch,
+        ))?;
+
+        // adaptive zero-padding
+        superblock.set_padded_size(self.max_superblock_size_in_epoch);
+
+        let droplet = Droplet::new(self.position, neighbors, superblock);
 
         self.position += 1;
 

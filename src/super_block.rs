@@ -16,14 +16,17 @@ pub struct SuperBlock {
     block_count: usize,
     /// Concatenated consensus-encoded blocks
     encoded_blocks_bytes: Vec<u8>,
+    /// Length of encoded bytes
+    bytes_length: usize,
 }
 
 impl SuperBlock {
-    pub fn new(size: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            padded_size: size,
+            padded_size: 0,
             block_count: 0,
             encoded_blocks_bytes: Vec::with_capacity(DEFAULT_SUPERBLOCK_SIZE),
+            bytes_length: 0,
         }
     }
 
@@ -32,6 +35,7 @@ impl SuperBlock {
 
         // block bytes prefixed with compact-size length
         self.encoded_blocks_bytes.extend_from_slice(&block_bytes);
+        self.bytes_length = self.encoded_blocks_bytes.len();
 
         self.block_count += 1;
 
@@ -39,12 +43,16 @@ impl SuperBlock {
     }
 
     /// Byte length of currently encoded blocks in superblock
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         // Add a reserve to encode compact-size length of the whole bytes vector.
         // 5 bytes is maximum realistic length of compact-size encoded number,
         // 5 bytes compact size can encode 65536 - 4294967295
         // We need to encode number of blocks in the vector and the total number of bytes.
-        self.encoded_blocks_bytes.len() + 2 * 5
+        self.bytes_length + 2 * 5
+    }
+
+    pub fn set_padded_size(&mut self, padded_size: usize) {
+        self.padded_size = padded_size;
     }
 
     /// Add padding at the end of concatenated block bytes and consensus-encode them
@@ -75,6 +83,12 @@ impl SuperBlock {
 
     pub fn block_count(&self) -> usize {
         self.block_count
+    }
+}
+
+impl Default for SuperBlock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
