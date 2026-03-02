@@ -47,6 +47,8 @@ where
         self.epoch = epoch;
         self.k = super_blocks.len();
         self.super_blocks = VecDeque::from(super_blocks);
+        self.max_superblock_size_in_epoch = 0;
+        self.position = 0;
 
         // find max superblock size in the epoch for padding
         for sb in self.super_blocks.iter() {

@@ -19,8 +19,8 @@ pub struct Droplet {
 }
 
 impl Droplet {
-    pub fn new(num: usize, neighbors: Vec<Neighbor>, super_block: SuperBlock) -> Self {
-        let data = super_block.into_encoded_bytes();
+    pub fn new(num: usize, neighbors: Vec<Neighbor>, superblock: SuperBlock) -> Self {
+        let data = superblock.into_encoded_bytes();
 
         Self {
             num,
