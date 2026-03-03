@@ -11,7 +11,7 @@ use crate::{
     decoder::dummy_decoder::DummyDecoder,
     droplet::Droplet,
     encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
-    super_block::{DEFAULT_SUPERBLOCK_SIZE, SuperBlock},
+    super_block::{EncodableBlock, SUPERBLOCK_SIZE, SuperBlock},
 };
 
 pub struct Blockchain {
@@ -41,14 +41,6 @@ impl Blockchain {
                 .build()?,
         );
 
-        ///////////////////////
-
-        let chain = in_chainman.inner.active_chain();
-        log::info!("Initializing blockchain reader");
-        log::info!("Active chain height: {}", chain.height());
-
-        ///////////////////////
-
         Ok(Self {
             config,
             in_chainman,
@@ -60,160 +52,184 @@ impl Blockchain {
     // TODO separate compressor and decompressor
 
     pub fn compress(&mut self) -> Result<()> {
-        log::info!(
-            "Starting compression of {} epochs, total {} blocks",
-            self.config.epochs_to_encode,
-            self.config.epochs_to_encode * self.config.blocks_per_epoch
-        );
+        let chain = self.in_chainman.inner.active_chain();
+        let chain_height = chain.height() as usize;
+        log::info!("Input chain height: {}", chain_height);
 
-        let blocks_per_epoch = self.config.blocks_per_epoch;
+        let epochs_to_encode = if self.config.epochs_to_encode == 0 {
+            log::info!(
+                "Starting compression of the whole blockchain with {} blocks",
+                chain_height
+            );
+            usize::MAX
+        } else {
+            log::info!(
+                "Starting compression of {} epochs, total {} superblocks",
+                self.config.epochs_to_encode,
+                self.config.epochs_to_encode * self.config.super_blocks_per_epoch
+            );
+            self.config.epochs_to_encode
+        };
+
         let encoder = &mut self.encoder;
 
-        let chain = self.in_chainman.inner.active_chain();
+        let mut epoch_processed_blocks;
+        let mut previous_total_processed_blocks = 0;
+        let mut total_processed_blocks = 0;
+        let mut processed_blocks_height = 0;
+        let mut epoch = 0;
+        log::info!("Compressing epoch {epoch}, processed block height: {}", 0);
 
-        for epoch in 0..self.config.epochs_to_encode {
-            // iterating over all requested epochs
-            log::info!("Compressing epoch {epoch}");
+        let mut super_blocks = Vec::new();
+        let mut superblock = SuperBlock::new();
+        let mut epoch_finished = false;
 
-            let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
-            fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
+        // iterating over all blocks
+        for (height, entry) in chain.iter().enumerate() {
+            let block = self
+                .in_chainman
+                .inner
+                .read_block_data(&entry)
+                .context("read block data")?;
 
-            // first we need to know max block size in epoch for blocks concatenation and padding
-            let mut max_block_size_in_epoch = 0;
-            for entry in chain
-                .iter()
-                .skip(epoch * blocks_per_epoch)
-                .take(blocks_per_epoch)
-            {
-                let block = self
-                    .in_chainman
-                    .inner
-                    .read_block_data(&entry)
-                    .context("read block data")?;
-                // Isn't there a better way to get the block size??
-                // TODO - make a lookup table?
-                let block_size = block.consensus_encode()?.len();
-                if block_size > max_block_size_in_epoch {
-                    max_block_size_in_epoch = block_size;
-                }
-            }
+            let block = EncodableBlock::new(block);
 
-            // Superblock size must be at least the size of the largest block in epoch
-            // We also need to encode number of blocks in the vector and the total number of bytes, so we add some overhead
-            let max_superblock_size =
-                std::cmp::max(DEFAULT_SUPERBLOCK_SIZE, max_block_size_in_epoch + 2 * 5 + 1);
-
-            log::info!(
-                "Max superblock size: {} | max_block_size_in_epoch: {}",
-                max_superblock_size,
-                max_block_size_in_epoch
+            log::debug!(
+                "current superblock len {}, block_size {}",
+                superblock.size(),
+                block.size(),
             );
 
-            let mut super_blocks = Vec::new();
-            let mut superblock = SuperBlock::new();
-            for (height, entry) in chain
-                .iter()
-                .enumerate()
-                .skip(epoch * blocks_per_epoch)
-                .take(blocks_per_epoch)
-            {
-                // iterating over blocks in epoch
-
-                let block = self
-                    .in_chainman
-                    .inner
-                    .read_block_data(&entry)
-                    .context("read block data")?;
-
-                // TODO use lookup table
-                let block_size = block.consensus_encode()?.len();
-                use bitcoin_consensus_encoding::Encoder;
-                let size_encoder = bitcoin_consensus_encoding::CompactSizeEncoder::new(block_size);
-                let block_size = block_size + size_encoder.current_chunk().len();
-
+            if superblock.size() + block.size() < SUPERBLOCK_SIZE {
+                // block fits in superblock => add it
+                log::debug!("  adding block {} to super block", height);
+                superblock
+                    .add(block)
+                    .context("adding block to super block")?;
+            } else {
+                // block does not fit => start new superblock
                 log::debug!(
-                    "current superblock len {}, block_size {}",
-                    superblock.size(),
-                    block_size,
+                    "-- closing current super block with {} blocks",
+                    superblock.block_count()
                 );
-                if superblock.size() + block_size < max_superblock_size {
-                    // block fits in superblock => add it
-                    log::debug!("  adding block {} to super block", height);
-                    superblock
-                        .add(block)
-                        .context("adding block to super block")?;
-                } else {
-                    // block does not fit => start new superblock
+
+                super_blocks.push(superblock);
+
+                log::debug!(">> starting new super block");
+                superblock = SuperBlock::new();
+                log::debug!("  adding block {} to super block", height);
+                superblock
+                    .add(block)
+                    .context("adding block to super block")?;
+            }
+
+            total_processed_blocks += 1;
+
+            if super_blocks.len() == self.config.super_blocks_per_epoch - 1 {
+                // Full epoch finished
+                epoch_finished = true;
+            }
+
+            if epoch_finished {
+                // Finalize epoch and start a new one
+                epoch_processed_blocks = total_processed_blocks - previous_total_processed_blocks;
+                previous_total_processed_blocks = total_processed_blocks;
+
+                // last superblock in epoch, add superblock to collection of superblocks
+                log::debug!(
+                    "== last superblock in epoch {} => closing current superblock, block {}, total {} superblocks",
+                    epoch,
+                    height,
+                    superblock.block_count()
+                );
+                log::debug!("  adding block {} to super block", height);
+                super_blocks.push(superblock);
+
+                // Generate droplets
+                let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
+                fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
+
+                let super_blocks_len = super_blocks.len();
+
+                encoder.init_epoch(epoch, super_blocks);
+                let mut rng = rand::rng();
+
+                log::info!(
+                    "Generating droplets for epoch {} with {} superblocks containing {} blocks",
+                    epoch,
+                    super_blocks_len,
+                    epoch_processed_blocks,
+                );
+
+                for num in 0..super_blocks_len {
+                    let droplet = encoder
+                        .generate_droplet(&mut rng)
+                        .with_context(|| format!("generate droplet {}", num))?;
+
+                    let encoded_droplet = droplet.encode_to_bytes();
+
                     log::debug!(
-                        "-- closing current super block with {} blocks",
-                        superblock.block_count()
+                        "-> droplet: {}, superblock size: {}, encoded: {} bytes",
+                        droplet.num,
+                        droplet.data_size(),
+                        encoded_droplet.len(),
                     );
 
-                    super_blocks.push(superblock);
-
-                    log::debug!(">> starting new super block");
-                    superblock = SuperBlock::new();
-                    log::debug!("  adding block {} to super block", height);
-                    superblock
-                        .add(block)
-                        .context("adding block to super block")?;
+                    let droplet_filename = format!("{:06}", num);
+                    let droplet_file_path = format!("{}/drp{}.dat", epoch_dir, droplet_filename);
+                    fs::write(droplet_file_path, encoded_droplet)?;
                 }
-                if (height + 1).is_multiple_of(blocks_per_epoch) {
-                    // last block in epoch, add superblock to collection of superblocks
-                    log::debug!(
-                        "== last block in epoch {} => closing current super block, block {}, total {} superblocks",
-                        epoch,
-                        height,
-                        superblock.block_count()
-                    );
-                    super_blocks.push(superblock);
+
+                if epoch == epochs_to_encode - 1 {
+                    log::debug!("Last requested epoch {} reached, finishing", epoch);
                     break;
                 }
+
+                // Start new epoch
+                epoch += 1;
+                log::info!(
+                    "Compressing epoch {epoch}, processed block height: {}",
+                    height
+                );
+                processed_blocks_height = height;
+
+                super_blocks = Vec::new();
+                superblock = SuperBlock::new();
+                log::debug!(">> starting new super block");
+                epoch_finished = false;
             }
 
-            // TODO decide what to do with the last (incomplete) epoch
-            // assert_eq!(
-            //     blocks_per_epoch,
-            //     super_blocks.len(),
-            //     "Not enough blocks per epoch"
-            // );
-            let super_blocks_len = super_blocks.len();
-
-            encoder.init_epoch(epoch, super_blocks);
-            let mut rng = rand::rng();
-
-            log::info!(
-                "Generating droplets for epoch {} with {} superblocks",
-                epoch,
-                super_blocks_len
-            );
-            for num in 0..super_blocks_len {
-                let droplet = encoder
-                    .generate_droplet(&mut rng)
-                    .with_context(|| format!("generate droplet {}", num))?;
-
-                let encoded_droplet = droplet.encode_to_bytes();
-
-                log::debug!(
-                    "-> droplet: {}, superblock size: {}, encoded: {} bytes",
-                    droplet.num,
-                    droplet.data_size(),
-                    encoded_droplet.len(),
-                );
-
-                let droplet_filename = format!("{:06}", num);
-                let droplet_file_path = format!("{}/drp{}.dat", epoch_dir, droplet_filename);
-                fs::write(droplet_file_path, encoded_droplet)?;
+            if height == chain_height {
+                log::info!("Incomplete epoch {} remains uncompressed, finishing", epoch);
             }
         }
 
+        let epochs_count_file_path = format!("{}/epochs.dat", self.config.droplets_dir);
+        fs::write(epochs_count_file_path, epoch.to_string())?;
+
         log::info!("All droplets were successfully created");
+        log::info!("Total processed blocks: {}", total_processed_blocks); // TODO correct saved block number
+        log::info!("Number of encoded blocks: {}", processed_blocks_height);
 
         Ok(())
     }
 
     pub fn restore(&self) -> Result<()> {
-        for epoch in 0..self.config.epochs_to_encode {
+        let out_chain = self.out_chainman.inner.active_chain();
+
+        let epochs_count_file_path = format!("{}/epochs.dat", self.config.droplets_dir);
+        let epochs =
+            fs::read_to_string(epochs_count_file_path).context("read epochs count from file")?;
+        let epochs = epochs.parse::<usize>().context("parse epochs string")?;
+
+        log::info!(
+            "Starting restoration of {} epochs, total {} superblocks",
+            epochs,
+            epochs * self.config.super_blocks_per_epoch
+        );
+
+        for epoch in 0..epochs {
+            log::info!("Reconstructed chain height: {}", out_chain.height());
             log::info!("Restoring epoch {epoch}");
 
             let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
@@ -244,6 +260,8 @@ impl Blockchain {
                 let droplet = Droplet::decode_from_bytes(&encoded_droplet)
                     .context("decode droplet from file bytes")?;
 
+                drop(encoded_droplet);
+
                 decoder
                     .add_droplet(droplet)
                     .context("add droplet to decoder")?;
@@ -255,10 +273,10 @@ impl Blockchain {
                 .decode(&mut recovered_blocks)
                 .context("fountain decoder: recover blocks from droplets")?;
 
-            // process queued super blocks
-            for (num, blocks) in recovered_blocks.iter() {
-                for (i, block) in blocks.iter().enumerate() {
-                    match self.out_chainman.inner.process_block(block) {
+            // Process queued super blocks
+            for (num, blocks) in recovered_blocks.into_iter() {
+                for (i, block) in blocks.into_iter().enumerate() {
+                    match self.out_chainman.inner.process_block(&block) {
                         ProcessBlockResult::NewBlock => {
                             log::debug!(
                                 "<  Droplet #{num}: block #{i:<2} from superblock validated and written to disk"
@@ -287,15 +305,7 @@ impl Blockchain {
 
         let out_chain = self.out_chainman.inner.active_chain();
 
-        // Get the reconstructed tip
-        let tip = out_chain.tip();
         log::info!("Reconstructed chain height: {}", out_chain.height());
-        log::info!("Reconstructed tip hash: {}", tip.block_hash());
-        let block = self.out_chainman.inner.read_block_data(&tip)?;
-        log::info!(
-            "Transactions count in the last reconstructed block: {}",
-            block.transaction_count()
-        );
 
         Ok(())
     }

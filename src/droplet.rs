@@ -37,7 +37,8 @@ impl Droplet {
         &self.data
     }
 
-    pub fn to_blocks(&self) -> anyhow::Result<Vec<Block>> {
+    /// Consumes the droplet and returns vector of blocks
+    pub fn into_blocks(self) -> anyhow::Result<Vec<Block>> {
         let mut blocks = Vec::new();
 
         let encoded_blocks: EncodedBlocks = encoding::decode_from_slice(&self.data)

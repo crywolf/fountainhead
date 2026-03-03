@@ -7,7 +7,7 @@ use encoding::{
     Encoder2, VecDecoder,
 };
 
-pub const DEFAULT_SUPERBLOCK_SIZE: usize = 10 * 1024; // TODO !!!!
+pub const SUPERBLOCK_SIZE: usize = 4_000_000;
 
 /// SuperBlock represents concatenated blocks (with padding)
 pub struct SuperBlock {
@@ -25,13 +25,13 @@ impl SuperBlock {
         Self {
             padded_size: 0,
             block_count: 0,
-            encoded_blocks_bytes: Vec::with_capacity(DEFAULT_SUPERBLOCK_SIZE),
+            encoded_blocks_bytes: Vec::with_capacity(SUPERBLOCK_SIZE),
             bytes_length: 0,
         }
     }
 
-    pub fn add(&mut self, block: Block) -> Result<()> {
-        let block_bytes = encoding::encode_to_vec(&EncodableBlock::new(block));
+    pub fn add(&mut self, encodable_block: EncodableBlock) -> Result<()> {
+        let block_bytes = encoding::encode_to_vec(&encodable_block);
 
         // block bytes prefixed with compact-size length
         self.encoded_blocks_bytes.extend_from_slice(&block_bytes);
@@ -145,10 +145,15 @@ pub struct EncodableBlock {
 }
 
 impl EncodableBlock {
-    fn new(block: Block) -> Self {
+    pub fn new(block: Block) -> Self {
         let data = block.consensus_encode().expect("should be valid block");
 
         Self { data }
+    }
+
+    /// Returns size of consensus-encoded block data
+    pub fn size(&self) -> usize {
+        self.data.len()
     }
 
     pub fn to_block(&self) -> Result<Block> {
