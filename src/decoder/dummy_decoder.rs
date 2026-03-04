@@ -41,7 +41,11 @@ impl DummyDecoder {
 
     /// Consumes decoder and decodes all droplets and put decoded blocks into provided blocks queue (BTreeMap indexed and ordered by droplet number)
     pub fn decode(self, recovered_blocks: &mut BTreeMap<usize, Vec<Block>>) -> Result<()> {
-        for droplet in self.droplets {
+        for (i, droplet) in self.droplets.into_iter().enumerate() {
+            if i.is_multiple_of(100) {
+                print_dot();
+            }
+
             log::debug!(
                 "<- decoded droplet #{}; neighbors: {:?}, droplet data: {} bytes",
                 droplet.num,
@@ -55,6 +59,7 @@ impl DummyDecoder {
             // add to queue
             recovered_blocks.insert(droplet_num, blocks);
         }
+        println!();
 
         Ok(())
     }
@@ -63,5 +68,12 @@ impl DummyDecoder {
 impl Default for DummyDecoder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn print_dot() {
+    if log::log_enabled!(log::Level::Info) {
+        print!(".");
+        _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }

@@ -6,7 +6,7 @@ pub struct Config {
     /// An epoch is defined as the time required for the blockchain to grow by `k` blocks (e.g., `k` = 10000).
     /// Here we use super blocks (that contain more concatenated blocks) instead of blocks
     pub super_blocks_per_epoch: usize,
-    /// Number of epochs to encode
+    /// Number of epochs to encode, 0 means encode the whole blockchain
     pub epochs_to_encode: usize,
     /// Number of worker threads for block validation
     pub worker_threads: i32,

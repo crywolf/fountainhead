@@ -34,7 +34,7 @@ fn main() -> Result<()> {
     let droplets_dir = args[4].clone();
 
     let epochs_to_encode = 0; // 0 means the whole blockchain
-    let super_blocks_per_epoch = 500; // TODO
+    let super_blocks_per_epoch = 900; // TODO
 
     let config = Config {
         droplets_dir,
@@ -46,6 +46,7 @@ fn main() -> Result<()> {
     };
 
     let degree_distribution = RobustSoliton::new(config.super_blocks_per_epoch, 0.06, 0.01);
+    // dbg!(degree_distribution.min_encoded_symbols()); // TODO
     let encoder = DummyEncoder::new(degree_distribution);
 
     let mut blockchain = Blockchain::new(config, encoder)?;

@@ -57,8 +57,8 @@ impl Droplet {
         Ok(blocks)
     }
 
-    pub fn encode_to_bytes(&self) -> Vec<u8> {
-        encoding::encode_to_vec(self)
+    pub fn encode_to_bytes(self) -> Vec<u8> {
+        encoding::encode_to_vec(&self)
     }
 
     pub fn decode_from_bytes(encoded_droplet: &[u8]) -> anyhow::Result<Self> {

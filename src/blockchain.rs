@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs};
+use std::{collections::BTreeMap, fs, io::Write};
 
 use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{
@@ -114,6 +114,9 @@ impl Blockchain {
                 );
 
                 super_blocks.push(superblock);
+                if super_blocks.len().is_multiple_of(100 - 1) {
+                    print_dot();
+                }
 
                 log::debug!(">> starting new super block");
                 superblock = SuperBlock::new();
@@ -131,6 +134,7 @@ impl Blockchain {
             }
 
             if epoch_finished {
+                println!();
                 // Finalize epoch and start a new one
                 epoch_processed_blocks = total_processed_blocks - previous_total_processed_blocks;
                 previous_total_processed_blocks = total_processed_blocks;
@@ -166,19 +170,29 @@ impl Blockchain {
                         .generate_droplet(&mut rng)
                         .with_context(|| format!("generate droplet {}", num))?;
 
+                    let droplet_num = droplet.num;
+                    let droplet_size = droplet.data_size();
                     let encoded_droplet = droplet.encode_to_bytes();
 
                     log::debug!(
                         "-> droplet: {}, superblock size: {}, encoded: {} bytes",
-                        droplet.num,
-                        droplet.data_size(),
+                        droplet_num,
+                        droplet_size,
                         encoded_droplet.len(),
                     );
 
                     let droplet_filename = format!("{:06}", num);
                     let droplet_file_path = format!("{}/drp{}.dat", epoch_dir, droplet_filename);
-                    fs::write(droplet_file_path, encoded_droplet)?;
+                    fs::write(droplet_file_path, encoded_droplet)
+                        .context("write droplet into a file")?;
+
+                    if num.is_multiple_of(100) {
+                        print_dot();
+                    }
                 }
+                println!();
+
+                processed_blocks_height = height;
 
                 if epoch == epochs_to_encode - 1 {
                     log::debug!("Last requested epoch {} reached, finishing", epoch);
@@ -191,7 +205,6 @@ impl Blockchain {
                     "Compressing epoch {epoch}, processed block height: {}",
                     height
                 );
-                processed_blocks_height = height;
 
                 super_blocks = Vec::new();
                 superblock = SuperBlock::new();
@@ -200,7 +213,12 @@ impl Blockchain {
             }
 
             if height == chain_height {
-                log::info!("Incomplete epoch {} remains uncompressed, finishing", epoch);
+                println!();
+                log::info!(
+                    "Incomplete epoch {} of {} blocks remains uncompressed, finishing",
+                    epoch,
+                    total_processed_blocks - processed_blocks_height
+                );
             }
         }
 
@@ -208,8 +226,7 @@ impl Blockchain {
         fs::write(epochs_count_file_path, epoch.to_string())?;
 
         log::info!("All droplets were successfully created");
-        log::info!("Total processed blocks: {}", total_processed_blocks); // TODO correct saved block number
-        log::info!("Number of encoded blocks: {}", processed_blocks_height);
+        log::info!("Number of compressed blocks: {}", processed_blocks_height);
 
         Ok(())
     }
@@ -248,7 +265,8 @@ impl Blockchain {
 
             let mut decoder = DummyDecoder::new();
 
-            for droplet_file_path in droplet_files.iter() {
+            log::info!("Adding droplets for epoch {epoch} to decoder");
+            for (i, droplet_file_path) in droplet_files.iter().enumerate() {
                 if !droplet_file_path.is_file() {
                     continue;
                 }
@@ -265,15 +283,21 @@ impl Blockchain {
                 decoder
                     .add_droplet(droplet)
                     .context("add droplet to decoder")?;
+
+                if i.is_multiple_of(100) {
+                    print_dot();
+                }
             }
+            println!();
 
+            log::info!("Decoding droplets for epoch {epoch}");
             let mut recovered_blocks = BTreeMap::new();
-
             decoder
                 .decode(&mut recovered_blocks)
                 .context("fountain decoder: recover blocks from droplets")?;
 
             // Process queued super blocks
+            log::info!("Inserting decoded blocks for epoch {epoch} into blockchain");
             for (num, blocks) in recovered_blocks.into_iter() {
                 for (i, block) in blocks.into_iter().enumerate() {
                     match self.out_chainman.inner.process_block(&block) {
@@ -297,7 +321,11 @@ impl Blockchain {
                         }
                     }
                 }
+                if num.is_multiple_of(100) {
+                    print_dot();
+                }
             }
+            println!();
         }
 
         ///////////////////////
@@ -308,6 +336,13 @@ impl Blockchain {
         log::info!("Reconstructed chain height: {}", out_chain.height());
 
         Ok(())
+    }
+}
+
+fn print_dot() {
+    if log::log_enabled!(log::Level::Info) {
+        print!(".");
+        _ = std::io::stdout().flush();
     }
 }
 
