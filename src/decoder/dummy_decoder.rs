@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result, bail};
-use bitcoinkernel::Block;
+use anyhow::{Result, bail};
 
 use crate::droplet::Droplet;
 
@@ -10,6 +9,7 @@ use crate::droplet::Droplet;
 pub struct DummyDecoder {
     droplet_data_size: usize, // Size of each block data in droplet in bytes
     droplets: Vec<Droplet>,   // Received encoded symbols (droplets)
+    recovered_droplets: BTreeMap<usize, Droplet>,
 }
 
 impl DummyDecoder {
@@ -18,6 +18,7 @@ impl DummyDecoder {
         Self {
             droplet_data_size: 0,
             droplets: Vec::new(),
+            recovered_droplets: BTreeMap::new(),
         }
     }
 
@@ -39,12 +40,10 @@ impl DummyDecoder {
         Ok(())
     }
 
-    /// Consumes decoder and decodes all droplets and put decoded blocks into provided blocks queue (BTreeMap indexed and ordered by droplet number)
-    pub fn decode(self, recovered_blocks: &mut BTreeMap<usize, Vec<Block>>) -> Result<()> {
-        for (i, droplet) in self.droplets.into_iter().enumerate() {
-            if i.is_multiple_of(100) {
-                print_dot();
-            }
+    /// Decodes inserted droplets
+    pub fn decode(&mut self) -> Result<()> {
+        for _ in 0..self.droplets.len() {
+            let droplet = self.droplets.pop().unwrap();
 
             log::debug!(
                 "<- decoded droplet #{}; neighbors: {:?}, droplet data: {} bytes",
@@ -53,27 +52,28 @@ impl DummyDecoder {
                 droplet.data_size(),
             );
 
-            let droplet_num = droplet.num;
-            let blocks = droplet.into_blocks().context("get blocks from droplet")?;
-
-            // add to queue
-            recovered_blocks.insert(droplet_num, blocks);
+            // add to ordered queue
+            self.recovered_droplets.insert(droplet.num, droplet);
         }
-        println!();
 
         Ok(())
+    }
+
+    pub fn get_droplet(&mut self, num: usize) -> Option<Droplet> {
+        if let Some(first) = self.recovered_droplets.first_entry() {
+            if first.key() == &num {
+                self.recovered_droplets.remove(&num)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
 impl Default for DummyDecoder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn print_dot() {
-    if log::log_enabled!(log::Level::Info) {
-        print!(".");
-        _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }

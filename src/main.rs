@@ -34,7 +34,7 @@ fn main() -> Result<()> {
     let droplets_dir = args[4].clone();
 
     let epochs_to_encode = 0; // 0 means the whole blockchain
-    let super_blocks_per_epoch = 900; // TODO
+    let super_blocks_per_epoch = 1000; // TODO
 
     let config = Config {
         droplets_dir,

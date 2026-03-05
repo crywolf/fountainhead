@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, io::Write};
+use std::{fs, io::Write};
 
 use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{
@@ -115,7 +115,7 @@ impl Blockchain {
 
                 super_blocks.push(superblock);
                 if super_blocks.len().is_multiple_of(100 - 1) {
-                    print_dot();
+                    print_progress();
                 }
 
                 log::debug!(">> starting new super block");
@@ -187,7 +187,7 @@ impl Blockchain {
                         .context("write droplet into a file")?;
 
                     if num.is_multiple_of(100) {
-                        print_dot();
+                        print_progress();
                     }
                 }
                 println!();
@@ -226,7 +226,10 @@ impl Blockchain {
         fs::write(epochs_count_file_path, epoch.to_string())?;
 
         log::info!("All droplets were successfully created");
-        log::info!("Number of compressed blocks: {}", processed_blocks_height);
+        log::info!(
+            "Number of compressed blocks (block height): {}",
+            processed_blocks_height
+        );
 
         Ok(())
     }
@@ -265,66 +268,81 @@ impl Blockchain {
 
             let mut decoder = DummyDecoder::new();
 
-            log::info!("Adding droplets for epoch {epoch} to decoder");
-            for (i, droplet_file_path) in droplet_files.iter().enumerate() {
-                if !droplet_file_path.is_file() {
-                    continue;
-                }
-
-                let encoded_droplet = fs::read(droplet_file_path.as_path()).with_context(|| {
-                    format!("read droplet file {}", droplet_file_path.display())
-                })?;
-
-                let droplet = Droplet::decode_from_bytes(&encoded_droplet)
-                    .context("decode droplet from file bytes")?;
-
-                drop(encoded_droplet);
-
-                decoder
-                    .add_droplet(droplet)
-                    .context("add droplet to decoder")?;
-
-                if i.is_multiple_of(100) {
-                    print_dot();
-                }
-            }
-            println!();
-
             log::info!("Decoding droplets for epoch {epoch}");
-            let mut recovered_blocks = BTreeMap::new();
-            decoder
-                .decode(&mut recovered_blocks)
-                .context("fountain decoder: recover blocks from droplets")?;
 
-            // Process queued super blocks
-            log::info!("Inserting decoded blocks for epoch {epoch} into blockchain");
-            for (num, blocks) in recovered_blocks.into_iter() {
-                for (i, block) in blocks.into_iter().enumerate() {
-                    match self.out_chainman.inner.process_block(&block) {
-                        ProcessBlockResult::NewBlock => {
-                            log::debug!(
-                                "<  Droplet #{num}: block #{i:<2} from superblock validated and written to disk"
-                            )
+            // We need blocks decoded in order, so we iterate from 0 to number of droplets
+            for num in 0..droplet_files.len() {
+                loop {
+                    decoder
+                        .decode()
+                        .context("fountain decoder: recover blocks from droplets")?;
+
+                    if let Some(decoded_droplet) = decoder.get_droplet(num) {
+                        // Next necessary block was decoded,
+                        // insert all its blocks into the blockchain
+
+                        let num = decoded_droplet.num;
+
+                        let blocks = decoded_droplet
+                            .into_blocks()
+                            .context("get blocks from droplet")?;
+
+                        for (i, block) in blocks.into_iter().enumerate() {
+                            match self.out_chainman.inner.process_block(&block) {
+                                ProcessBlockResult::NewBlock => {
+                                    log::debug!(
+                                        "<  Droplet #{num}: block #{i:<2} from superblock validated and written to disk"
+                                    )
+                                }
+                                ProcessBlockResult::Duplicate => {
+                                    log::debug!(
+                                        "<  Droplet #{num}: block #{i:<2} from superblock already known (valid)"
+                                    )
+                                }
+                                ProcessBlockResult::Rejected => {
+                                    log::error!(
+                                        "!! Droplet #{num}: block #{i:<2} from superblock validation failed!"
+                                    );
+                                    bail!(
+                                        "Droplet #{num}: block #{i:<2} from superblock validation failed!"
+                                    )
+                                }
+                            }
                         }
-                        ProcessBlockResult::Duplicate => {
-                            log::debug!(
-                                "<  Droplet #{num}: block #{i:<2} from superblock already known (valid)"
-                            )
-                        }
-                        ProcessBlockResult::Rejected => {
-                            log::error!(
-                                "!! Droplet #{num}: block #{i:<2} from superblock validation failed!"
-                            );
-                            bail!(
-                                "Droplet #{num}: block #{i:<2} from superblock validation failed!"
-                            )
+                        // All blocks from the droplet were inserted
+                        break;
+                    } else {
+                        // Add another droplet to the decoder
+                        if let Some(droplet_file_path) = droplet_files.pop() {
+                            if !droplet_file_path.is_file() {
+                                bail!("Not a file {}", droplet_file_path.display());
+                            }
+
+                            let encoded_droplet = fs::read(droplet_file_path.as_path())
+                                .with_context(|| {
+                                    format!("read droplet file {}", droplet_file_path.display())
+                                })?;
+
+                            let droplet = Droplet::decode_from_bytes(&encoded_droplet)
+                                .context("decode droplet from file bytes")?;
+
+                            drop(encoded_droplet);
+
+                            decoder
+                                .add_droplet(droplet)
+                                .context("add droplet to decoder")?;
+                        } else {
+                            // No more droplet files left
+                            break;
                         }
                     }
                 }
-                if num.is_multiple_of(100) {
-                    print_dot();
+
+                if num.is_multiple_of(50) {
+                    print_progress();
                 }
             }
+            // next epoch
             println!();
         }
 
@@ -339,7 +357,7 @@ impl Blockchain {
     }
 }
 
-fn print_dot() {
+fn print_progress() {
     if log::log_enabled!(log::Level::Info) {
         print!(".");
         _ = std::io::stdout().flush();
