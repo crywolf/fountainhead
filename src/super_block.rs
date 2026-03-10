@@ -3,8 +3,8 @@ use bitcoin_consensus_encoding as encoding;
 use bitcoinkernel::Block;
 
 use encoding::{
-    ByteVecDecoder, BytesEncoder, CompactSizeEncoder, Decodable, Decoder, Encodable, Encoder,
-    Encoder2, VecDecoder,
+    ByteVecDecoder, BytesEncoder, CompactSizeDecoder, CompactSizeEncoder, Decodable, Decoder,
+    Decoder4, Encodable, Encoder, Encoder2, Encoder4, VecDecoder,
 };
 
 pub const SUPERBLOCK_SIZE: usize = 4_000_000;
@@ -89,6 +89,83 @@ impl SuperBlock {
 impl Default for SuperBlock {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+encoding::encoder_newtype! {
+    /// The encoder for the [`SuperBlock`] type.
+    pub struct SuperBlockEncoder<'e>(Encoder4<CompactSizeEncoder, CompactSizeEncoder, CompactSizeEncoder, Encoder2<CompactSizeEncoder, BytesEncoder<'e>>>);
+}
+
+impl Encodable for SuperBlock {
+    type Encoder<'e>
+        = SuperBlockEncoder<'e>
+    where
+        Self: 'e;
+
+    fn encoder(&self) -> Self::Encoder<'_> {
+        let padded_size = CompactSizeEncoder::new(self.padded_size);
+        let block_count = CompactSizeEncoder::new(self.block_count);
+        let bytes_length = CompactSizeEncoder::new(self.bytes_length);
+
+        let encoded_blocks = Encoder2::new(
+            CompactSizeEncoder::new(self.encoded_blocks_bytes.len()),
+            BytesEncoder::without_length_prefix(self.encoded_blocks_bytes.as_ref()),
+        );
+
+        SuperBlockEncoder::new(Encoder4::new(
+            padded_size,
+            block_count,
+            bytes_length,
+            encoded_blocks,
+        ))
+    }
+}
+
+/// The decoder for the [`SuperBlock`] type.
+pub struct SuperBlockDecoder(
+    Decoder4<CompactSizeDecoder, CompactSizeDecoder, CompactSizeDecoder, ByteVecDecoder>,
+);
+
+impl Decodable for SuperBlock {
+    type Decoder = SuperBlockDecoder;
+
+    fn decoder() -> Self::Decoder {
+        let padded_size = CompactSizeDecoder::new();
+        let block_count = CompactSizeDecoder::new();
+        let bytes_length = CompactSizeDecoder::new();
+        let encoded_blocks = ByteVecDecoder::new();
+
+        SuperBlockDecoder(Decoder4::new(
+            padded_size,
+            block_count,
+            bytes_length,
+            encoded_blocks,
+        ))
+    }
+}
+
+impl Decoder for SuperBlockDecoder {
+    type Output = SuperBlock;
+    type Error = anyhow::Error;
+
+    fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
+        Ok(self.0.push_bytes(bytes)?)
+    }
+
+    fn end(self) -> std::result::Result<Self::Output, Self::Error> {
+        let (padded_size, block_count, bytes_length, encoded_blocks_bytes) = self.0.end()?;
+
+        Ok(SuperBlock {
+            padded_size,
+            block_count,
+            bytes_length,
+            encoded_blocks_bytes,
+        })
+    }
+
+    fn read_limit(&self) -> usize {
+        self.0.read_limit()
     }
 }
 

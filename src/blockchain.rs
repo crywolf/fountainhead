@@ -11,6 +11,7 @@ use crate::{
     decoder::dummy_decoder::DummyDecoder,
     droplet::Droplet,
     encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
+    storage::{Storage, tmp_file_storage::TmpFileStorage},
     super_block::{EncodableBlock, SUPERBLOCK_SIZE, SuperBlock},
 };
 
@@ -18,11 +19,14 @@ pub struct Blockchain {
     config: Config,
     in_chainman: InputChainstateManager,
     out_chainman: OutputChainstateManager,
-    encoder: DummyEncoder<RobustSoliton>,
+    encoder: DummyEncoder<RobustSoliton, TmpFileStorage>,
 }
 
 impl Blockchain {
-    pub fn new(config: Config, encoder: DummyEncoder<RobustSoliton>) -> Result<Self> {
+    pub fn new(
+        config: Config,
+        encoder: DummyEncoder<RobustSoliton, TmpFileStorage>,
+    ) -> Result<Self> {
         let context = ContextBuilder::new()
             .chain_type(ChainType::Signet)
             .build()?;
@@ -80,7 +84,9 @@ impl Blockchain {
         let mut epoch = 0;
         log::info!("Compressing epoch {epoch}, processed block height: {}", 0);
 
-        let mut super_blocks = Vec::new();
+        let mut superblock_storage = TmpFileStorage::new()
+            .with_context(|| format!("create superblocks storage for epoch {}", epoch))?;
+        let mut super_blocks_count = 0;
         let mut superblock = SuperBlock::new();
         let mut epoch_finished = false;
 
@@ -113,8 +119,12 @@ impl Blockchain {
                     superblock.block_count()
                 );
 
-                super_blocks.push(superblock);
-                if super_blocks.len().is_multiple_of(100 - 1) {
+                superblock_storage
+                    .insert(super_blocks_count, superblock)
+                    .context("insert superblock")?;
+
+                super_blocks_count += 1;
+                if super_blocks_count.is_multiple_of(100 - 1) {
                     print_progress();
                 }
 
@@ -128,7 +138,7 @@ impl Blockchain {
 
             total_processed_blocks += 1;
 
-            if super_blocks.len() == self.config.super_blocks_per_epoch - 1 {
+            if super_blocks_count == self.config.super_blocks_per_epoch - 1 {
                 // Full epoch finished
                 epoch_finished = true;
             }
@@ -147,25 +157,28 @@ impl Blockchain {
                     superblock.block_count()
                 );
                 log::debug!("  adding block {} to super block", height);
-                super_blocks.push(superblock);
+
+                superblock_storage
+                    .insert(super_blocks_count, superblock)
+                    .context("insert superblock")?;
+
+                super_blocks_count += 1;
 
                 // Generate droplets
                 let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
                 fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
 
-                let super_blocks_len = super_blocks.len();
-
-                encoder.init_epoch(epoch, super_blocks);
+                encoder.init_epoch(epoch, superblock_storage);
                 let mut rng = rand::rng();
 
                 log::info!(
                     "Generating droplets for epoch {} with {} superblocks containing {} blocks",
                     epoch,
-                    super_blocks_len,
+                    super_blocks_count,
                     epoch_processed_blocks,
                 );
 
-                for num in 0..super_blocks_len {
+                for num in 0..super_blocks_count {
                     let droplet = encoder
                         .generate_droplet(&mut rng)
                         .with_context(|| format!("generate droplet {}", num))?;
@@ -192,6 +205,9 @@ impl Blockchain {
                 }
                 println!();
 
+                // get rid of processed superblock files eagerly to save used disk space without delay
+                encoder.truncate_storage().context("truncate storage")?;
+
                 processed_blocks_height = height;
 
                 if epoch == epochs_to_encode - 1 {
@@ -206,7 +222,10 @@ impl Blockchain {
                     height
                 );
 
-                super_blocks = Vec::new();
+                super_blocks_count = 0;
+                superblock_storage = TmpFileStorage::new()
+                    .with_context(|| format!("create superblocks storage for epoch {}", epoch))?;
+
                 superblock = SuperBlock::new();
                 log::debug!(">> starting new super block");
                 epoch_finished = false;
