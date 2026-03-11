@@ -1,3 +1,4 @@
+pub mod file_storage;
 pub mod tmp_file_storage;
 
 pub trait Storage<K, V> {

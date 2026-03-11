@@ -4,14 +4,12 @@ use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{
     ChainType, ChainstateManager, ChainstateManagerBuilder, ContextBuilder, ProcessBlockResult,
 };
-use rand::seq::SliceRandom;
 
 use crate::{
     config::Config,
     decoder::dummy_decoder::DummyDecoder,
-    droplet::Droplet,
     encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
-    storage::{Storage, tmp_file_storage::TmpFileStorage},
+    storage::{Storage, file_storage::FileStorage, tmp_file_storage::TmpFileStorage},
     super_block::{EncodableBlock, SUPERBLOCK_SIZE, SuperBlock},
 };
 
@@ -113,7 +111,7 @@ impl Blockchain {
                     .add(block)
                     .context("adding block to super block")?;
             } else {
-                // block does not fit => start new superblock
+                // block does not fit in => start new superblock
                 log::debug!(
                     "-- closing current super block with {} blocks",
                     superblock.block_count()
@@ -165,8 +163,8 @@ impl Blockchain {
                 super_blocks_count += 1;
 
                 // Generate droplets
-                let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
-                fs::create_dir_all(&epoch_dir).context("create epoch dir to store droplets")?;
+                let mut droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
+                    .with_context(|| format!("create droplet storage for epoch {}", epoch))?;
 
                 encoder.init_epoch(epoch, superblock_storage);
                 let mut rng = rand::rng();
@@ -185,19 +183,16 @@ impl Blockchain {
 
                     let droplet_num = droplet.num;
                     let droplet_size = droplet.data_size();
-                    let encoded_droplet = droplet.encode_to_bytes();
 
                     log::debug!(
-                        "-> droplet: {}, superblock size: {}, encoded: {} bytes",
+                        "-> droplet: {}, superblock size: {}",
                         droplet_num,
                         droplet_size,
-                        encoded_droplet.len(),
                     );
 
-                    let droplet_filename = format!("{:06}", num);
-                    let droplet_file_path = format!("{}/drp{}.dat", epoch_dir, droplet_filename);
-                    fs::write(droplet_file_path, encoded_droplet)
-                        .context("write droplet into a file")?;
+                    droplet_storage
+                        .insert(droplet_num, droplet)
+                        .context("store droplet")?;
 
                     if num.is_multiple_of(100) {
                         print_progress();
@@ -238,6 +233,7 @@ impl Blockchain {
                     epoch,
                     total_processed_blocks - processed_blocks_height
                 );
+                epoch -= 1;
             }
         }
 
@@ -267,30 +263,20 @@ impl Blockchain {
             epochs * self.config.super_blocks_per_epoch
         );
 
-        for epoch in 0..epochs {
+        for epoch in 0..=epochs {
             log::info!("Reconstructed chain height: {}", out_chain.height());
             log::info!("Restoring epoch {epoch}");
-
-            let epoch_dir = format!("{}/epoch{:06}", self.config.droplets_dir, epoch);
-
-            let mut droplet_files = fs::read_dir(&epoch_dir)
-                .with_context(|| format!("read dir {}", epoch_dir))?
-                .map(|res| res.map(|e| e.path()))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            // sort droplet files by their path, ie. name
-            // droplet_files.sort();
-
-            // shuffle droplets to simulate randomness of blocks decoding order
-            let mut rng = rand::rng();
-            droplet_files.shuffle(&mut rng);
 
             let mut decoder = DummyDecoder::new();
 
             log::info!("Decoding droplets for epoch {epoch}");
 
+            let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
+                .with_context(|| format!("open droplet storage for epoch {}", epoch))?;
+
             // We need blocks decoded in order, so we iterate from 0 to number of droplets
-            for num in 0..droplet_files.len() {
+            for num in 0..droplet_storage.count() {
+                let mut added_droplets_count = 0;
                 loop {
                     decoder
                         .decode()
@@ -328,28 +314,20 @@ impl Blockchain {
                                 }
                             }
                         }
-                        // All blocks from the droplet were inserted
+                        // All blocks from the droplet were inserted into blockchain
                         break;
                     } else {
                         // Add another droplet to the decoder
-                        if let Some(droplet_file_path) = droplet_files.pop() {
-                            if !droplet_file_path.is_file() {
-                                bail!("Not a file {}", droplet_file_path.display());
-                            }
-
-                            let encoded_droplet = fs::read(droplet_file_path.as_path())
-                                .with_context(|| {
-                                    format!("read droplet file {}", droplet_file_path.display())
-                                })?;
-
-                            let droplet = Droplet::decode_from_bytes(&encoded_droplet)
-                                .context("decode droplet from file bytes")?;
-
-                            drop(encoded_droplet);
+                        if added_droplets_count < droplet_storage.count() {
+                            let droplet = droplet_storage
+                                .get(num)
+                                .context("get droplet from storage")?;
 
                             decoder
                                 .add_droplet(droplet)
                                 .context("add droplet to decoder")?;
+
+                            added_droplets_count += 1;
                         } else {
                             // No more droplet files left
                             break;
@@ -363,6 +341,11 @@ impl Blockchain {
             }
             // next epoch
             println!();
+
+            // remove used droplet files
+            droplet_storage
+                .truncate()
+                .with_context(|| format!("truncate droplet storage for epoch {}", epoch))?;
         }
 
         ///////////////////////
