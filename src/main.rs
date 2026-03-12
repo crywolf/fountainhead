@@ -55,7 +55,7 @@ fn main() -> Result<()> {
         RobustSoliton::new(compressor_config.super_blocks_per_epoch, 0.06, 0.01);
 
     println!(
-        "Number of necessary droplets to restore blockchain compressed with using {} superblocks in epoch is {}",
+        "Number of necessary droplets to restore blockchain compressed using {} superblocks in epoch, is {}",
         compressor_config.super_blocks_per_epoch,
         degree_distribution.min_encoded_symbols()
     );

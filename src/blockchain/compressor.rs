@@ -98,7 +98,8 @@ impl Compressor {
                 fs::read_to_string(last_block_file_path).unwrap_or_else(|_| "0".to_string());
             already_compressed_blocks = last_compressed_block
                 .parse::<usize>()
-                .context("parse last_compressed_block string")?;
+                .context("parse last_compressed_block string")?
+                + 1;
 
             total_processed_blocks = already_compressed_blocks;
             processed_blocks_height = total_processed_blocks;
@@ -268,7 +269,7 @@ impl Compressor {
                         "{}/{}",
                         &self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
                     );
-                    fs::write(last_block_file_path, height.to_string())?;
+                    fs::write(last_block_file_path, processed_blocks_height.to_string())?;
                 }
 
                 // Start new epoch
@@ -299,7 +300,7 @@ impl Compressor {
         }
 
         log::info!(
-            "All droplets in total {} epochs were successfully created",
+            "All droplets in {} epochs were successfully created",
             epoch + 1
         );
         log::info!(
