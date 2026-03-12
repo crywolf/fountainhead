@@ -32,6 +32,15 @@ impl FileStorage {
         fs::remove_dir_all(self.dir).context("FileStorage: remove epoch dir")
     }
 
+    pub fn epoch_count(droplets_dir: &str) -> Result<usize> {
+        let epoch_count = fs::read_dir(droplets_dir)
+            .with_context(|| format!("read dir {}", droplets_dir))?
+            .filter(|e| e.is_ok() && e.as_ref().unwrap().path().is_dir())
+            .count();
+
+        Ok(epoch_count)
+    }
+
     fn filepath(&self, key: usize) -> String {
         let file_num = format!("{:06}", key);
         let file_path = format!("{}/drp{}.dat", self.dir, file_num);

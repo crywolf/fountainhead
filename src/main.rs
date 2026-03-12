@@ -46,7 +46,11 @@ fn main() -> Result<()> {
     };
 
     let degree_distribution = RobustSoliton::new(config.super_blocks_per_epoch, 0.06, 0.01);
-    // dbg!(degree_distribution.min_encoded_symbols()); // TODO
+    println!(
+        "Number of necessary droplets to restore blockchain compressed with using {} superblocks in epoch is {}",
+        config.super_blocks_per_epoch,
+        degree_distribution.min_encoded_symbols()
+    );
     let encoder = DummyEncoder::new(degree_distribution);
 
     let mut blockchain = Blockchain::new(config, encoder)?;

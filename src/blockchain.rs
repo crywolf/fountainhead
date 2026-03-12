@@ -54,22 +54,16 @@ impl Blockchain {
     // TODO separate compressor and decompressor
 
     pub fn compress(&mut self) -> Result<()> {
+        const EPOCHS_COUNT_FILE: &str = "epochs_count.dat";
+        const LAST_COMPRESSED_BLOCK_FILE: &str = "last_compressed_block.dat";
+
         let chain = self.in_chainman.inner.active_chain();
         let chain_height = chain.height() as usize;
         log::info!("Input chain height: {}", chain_height);
 
         let epochs_to_encode = if self.config.epochs_to_encode == 0 {
-            log::info!(
-                "Starting compression of the whole blockchain with {} blocks",
-                chain_height
-            );
             usize::MAX
         } else {
-            log::info!(
-                "Starting compression of {} epochs, total {} superblocks",
-                self.config.epochs_to_encode,
-                self.config.epochs_to_encode * self.config.super_blocks_per_epoch
-            );
             self.config.epochs_to_encode
         };
 
@@ -80,7 +74,60 @@ impl Blockchain {
         let mut total_processed_blocks = 0;
         let mut processed_blocks_height = 0;
         let mut epoch = 0;
-        log::info!("Compressing epoch {epoch}, processed block height: {}", 0);
+        let mut already_compressed_blocks = 0;
+
+        // Determine if we start from scratch or resume interrupted compression
+        if FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default() > 1 {
+            // Resuming interrupted compression
+            let epochs_count_file_path =
+                format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
+            let epochs_count =
+                fs::read_to_string(epochs_count_file_path).unwrap_or_else(|_| "0".to_string());
+            let already_compressed_epochs = epochs_count
+                .parse::<usize>()
+                .context("parse already_compressed_epochs string")?;
+
+            epoch = already_compressed_epochs;
+
+            let last_block_file_path = format!(
+                "{}/{}",
+                self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
+            );
+            let last_compressed_block =
+                fs::read_to_string(last_block_file_path).unwrap_or_else(|_| "0".to_string());
+            already_compressed_blocks = last_compressed_block
+                .parse::<usize>()
+                .context("parse last_compressed_block string")?;
+
+            total_processed_blocks = already_compressed_blocks;
+            processed_blocks_height = total_processed_blocks;
+            previous_total_processed_blocks = total_processed_blocks;
+
+            log::info!(
+                "Resuming compression of epoch #{epoch} (last compressed block: {})",
+                already_compressed_blocks
+            );
+        } else {
+            // Starting from scratch
+            if self.config.epochs_to_encode == 0 {
+                log::info!(
+                    "Starting compression of the whole blockchain with {} blocks",
+                    chain_height
+                );
+            } else {
+                log::info!(
+                    "Starting compression of {} epochs, total {} superblocks",
+                    self.config.epochs_to_encode,
+                    self.config.epochs_to_encode * self.config.super_blocks_per_epoch
+                );
+            };
+        }
+
+        // Start compression
+        log::info!(
+            "Compressing epoch #{epoch}, starting at block height: {}",
+            already_compressed_blocks
+        );
 
         let mut superblock_storage = TmpFileStorage::new()
             .with_context(|| format!("create superblocks storage for epoch {}", epoch))?;
@@ -89,7 +136,7 @@ impl Blockchain {
         let mut epoch_finished = false;
 
         // iterating over all blocks
-        for (height, entry) in chain.iter().enumerate() {
+        for (height, entry) in chain.iter().enumerate().skip(already_compressed_blocks) {
             let block = self
                 .in_chainman
                 .inner
@@ -170,7 +217,7 @@ impl Blockchain {
                 let mut rng = rand::rng();
 
                 log::info!(
-                    "Generating droplets for epoch {} with {} superblocks containing {} blocks",
+                    "Generating droplets for epoch #{} with {} superblocks containing {} blocks",
                     epoch,
                     super_blocks_count,
                     epoch_processed_blocks,
@@ -198,22 +245,35 @@ impl Blockchain {
                         print_progress();
                     }
                 }
+
+                // All droplets for epoch were generated
                 println!();
 
-                // get rid of processed superblock files eagerly to save used disk space without delay
+                // Get rid of processed superblock files eagerly to save used disk space without delay
                 encoder.truncate_storage().context("truncate storage")?;
 
                 processed_blocks_height = height;
 
                 if epoch == epochs_to_encode - 1 {
-                    log::debug!("Last requested epoch {} reached, finishing", epoch);
+                    log::info!("Last requested epoch #{} reached, finishing", epoch);
                     break;
+                } else {
+                    // Store last compressed epoch and block to enable resuming interrupted compression
+                    let epochs_count_file_path =
+                        format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
+                    fs::write(epochs_count_file_path, (epoch + 1).to_string())?;
+
+                    let last_block_file_path = format!(
+                        "{}/{}",
+                        &self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
+                    );
+                    fs::write(last_block_file_path, height.to_string())?;
                 }
 
                 // Start new epoch
                 epoch += 1;
                 log::info!(
-                    "Compressing epoch {epoch}, processed block height: {}",
+                    "Compressing epoch #{epoch}, processed block height: {}",
                     height
                 );
 
@@ -229,7 +289,7 @@ impl Blockchain {
             if height == chain_height {
                 println!();
                 log::info!(
-                    "Incomplete epoch {} of {} blocks remains uncompressed, finishing",
+                    "Incomplete epoch #{} of {} blocks remains uncompressed, finishing",
                     epoch,
                     total_processed_blocks - processed_blocks_height
                 );
@@ -237,10 +297,10 @@ impl Blockchain {
             }
         }
 
-        let epochs_count_file_path = format!("{}/epochs.dat", self.config.droplets_dir);
-        fs::write(epochs_count_file_path, epoch.to_string())?;
-
-        log::info!("All droplets were successfully created");
+        log::info!(
+            "All droplets in total {} epochs were successfully created",
+            epoch + 1
+        );
         log::info!(
             "Number of compressed blocks (block height): {}",
             processed_blocks_height
@@ -252,24 +312,21 @@ impl Blockchain {
     pub fn restore(&self) -> Result<()> {
         let out_chain = self.out_chainman.inner.active_chain();
 
-        let epochs_count_file_path = format!("{}/epochs.dat", self.config.droplets_dir);
-        let epochs =
-            fs::read_to_string(epochs_count_file_path).context("read epochs count from file")?;
-        let epochs = epochs.parse::<usize>().context("parse epochs string")?;
+        let epochs_count = FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default();
 
         log::info!(
             "Starting restoration of {} epochs, total {} superblocks",
-            epochs,
-            epochs * self.config.super_blocks_per_epoch
+            epochs_count,
+            epochs_count * self.config.super_blocks_per_epoch
         );
 
-        for epoch in 0..=epochs {
+        for epoch in 0..=epochs_count {
             log::info!("Reconstructed chain height: {}", out_chain.height());
-            log::info!("Restoring epoch {epoch}");
+            log::info!("Restoring epoch #{epoch}");
 
             let mut decoder = DummyDecoder::new();
 
-            log::info!("Decoding droplets for epoch {epoch}");
+            log::info!("Decoding droplets for epoch #{epoch}");
 
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                 .with_context(|| format!("open droplet storage for epoch {}", epoch))?;
@@ -339,10 +396,10 @@ impl Blockchain {
                     print_progress();
                 }
             }
-            // next epoch
+            // Next epoch
             println!();
 
-            // remove used droplet files
+            // Remove used droplet files
             droplet_storage
                 .truncate()
                 .with_context(|| format!("truncate droplet storage for epoch {}", epoch))?;
