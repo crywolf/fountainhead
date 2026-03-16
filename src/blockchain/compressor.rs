@@ -5,7 +5,7 @@ use bitcoinkernel::{ChainType, ChainstateManagerBuilder, ContextBuilder};
 
 use crate::{
     blockchain::{InputChainstateManager, print_progress},
-    encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
+    encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
     storage::{Storage, file_storage::FileStorage, tmp_file_storage::TmpFileStorage},
     super_block::{EncodableBlock, SUPERBLOCK_SIZE, SuperBlock},
 };
@@ -29,13 +29,17 @@ pub struct Config {
 pub struct Compressor {
     config: Config,
     input_chainman: InputChainstateManager,
-    encoder: DummyEncoder<RobustSoliton, TmpFileStorage>,
+    encoder: FountainEncoder<RobustSoliton, TmpFileStorage>,
+    //TODO
+    //encoder: crate::encoder::dummy_encoder::DummyEncoder<RobustSoliton, TmpFileStorage>,
 }
 
 impl Compressor {
     pub fn new(
         config: Config,
-        encoder: DummyEncoder<RobustSoliton, TmpFileStorage>,
+        // TODO
+        //encoder: crate::encoder::dummy_encoder::DummyEncoder<RobustSoliton, TmpFileStorage>,
+        encoder: FountainEncoder<RobustSoliton, TmpFileStorage>,
     ) -> Result<Self> {
         let context = ContextBuilder::new()
             .chain_type(ChainType::Signet)
@@ -80,6 +84,8 @@ impl Compressor {
         // Determine if we start from scratch or resume interrupted compression
         if FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default() > 1 {
             // Resuming interrupted compression
+
+            // TODO put path creation into function
             let epochs_count_file_path =
                 format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
             let epochs_count =
@@ -90,6 +96,7 @@ impl Compressor {
 
             epoch = already_compressed_epochs;
 
+            // TODO put path creation into function
             let last_block_file_path = format!(
                 "{}/{}",
                 self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
@@ -134,7 +141,7 @@ impl Compressor {
         let mut superblock_storage = TmpFileStorage::new()
             .with_context(|| format!("create superblocks storage for epoch {}", epoch))?;
         let mut super_blocks_count = 0;
-        let mut superblock = SuperBlock::new();
+        let mut superblock = SuperBlock::new(super_blocks_count);
         let mut epoch_finished = false;
 
         // iterating over all blocks
@@ -170,13 +177,13 @@ impl Compressor {
                     .insert(super_blocks_count, superblock)
                     .context("insert superblock")?;
 
-                super_blocks_count += 1;
-                if super_blocks_count.is_multiple_of(100 - 1) {
+                if super_blocks_count.is_multiple_of(50) {
                     print_progress();
                 }
+                super_blocks_count += 1;
 
                 log::debug!(">> starting new super block");
-                superblock = SuperBlock::new();
+                superblock = SuperBlock::new(super_blocks_count);
                 log::debug!("  adding block {} to super block", height);
                 superblock
                     .add(block)
@@ -215,7 +222,7 @@ impl Compressor {
                 let mut droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                     .with_context(|| format!("create droplet storage for epoch {}", epoch))?;
 
-                encoder.init_epoch(epoch, superblock_storage);
+                encoder.init_epoch(epoch, superblock_storage, droplet_storage.count());
                 let mut rng = rand::rng();
 
                 log::info!(
@@ -225,6 +232,7 @@ impl Compressor {
                     epoch_processed_blocks,
                 );
 
+                // TODO produce correct number of droplets according to compress ratio
                 for num in 0..super_blocks_count {
                     let droplet = encoder
                         .generate_droplet(&mut rng)
@@ -243,7 +251,7 @@ impl Compressor {
                         .insert(droplet_num, droplet)
                         .context("store droplet")?;
 
-                    if num.is_multiple_of(100) {
+                    if num.is_multiple_of(50) {
                         print_progress();
                     }
                 }
@@ -283,7 +291,7 @@ impl Compressor {
                 superblock_storage = TmpFileStorage::new()
                     .with_context(|| format!("create superblocks storage for epoch {}", epoch))?;
 
-                superblock = SuperBlock::new();
+                superblock = SuperBlock::new(super_blocks_count);
                 log::debug!(">> starting new super block");
                 epoch_finished = false;
             }
@@ -307,6 +315,17 @@ impl Compressor {
             "Number of compressed blocks (block height): {}",
             processed_blocks_height
         );
+
+        // TODO put path creation into function
+        let epochs_count_file_path = format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
+        _ = fs::remove_file(epochs_count_file_path);
+
+        // TODO put path creation into function
+        let last_block_file_path = format!(
+            "{}/{}",
+            self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
+        );
+        _ = fs::remove_file(last_block_file_path);
 
         Ok(())
     }

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use anyhow::Result;
 use rand::Rng;
 use rand::distr::Distribution;
@@ -19,8 +21,6 @@ where
     k: usize,
     /// Source data storage
     super_blocks: Option<S>,
-    /// Maximum size of a superblock in an epoch, used for adaptive padding
-    max_superblock_size_in_epoch: usize,
     /// What superblock is currently being processed
     position: usize,
     // Not used. Only for trait compatibility.
@@ -37,14 +37,13 @@ where
             epoch: 0,
             k: 0,
             super_blocks: None,
-            max_superblock_size_in_epoch: 0,
             position: 0,
             _degree_distribution: degree_distribution,
         }
     }
 
     /// Initialize the encoder for a new epoch with the given source blocks from that epoch
-    pub fn init_epoch(&mut self, epoch: usize, superblock_storage: S)
+    pub fn init_epoch(&mut self, epoch: usize, superblock_storage: S, _current_droplet_count: usize)
     where
         S: Storage<usize, SuperBlock>,
     {
@@ -52,22 +51,21 @@ where
 
         self.epoch = epoch;
         self.k = superblock_storage.count();
-        self.max_superblock_size_in_epoch = superblock_storage.max_size();
         self.super_blocks = Some(superblock_storage);
         self.position = 0;
     }
 
     /// Generate a fake droplet containing next superblock from the superblocks
-    pub fn generate_droplet<R: Rng>(&mut self, _rng: &mut R) -> Result<Droplet> {
-        let neighbors = vec![Neighbor::new(self.position)];
+    pub fn generate_droplet<R: Rng>(&mut self, _rng: &mut R) -> Result<Droplet>
+    where
+        <S as Storage<usize, SuperBlock>>::Error: Display,
+    {
+        if let Some(super_blocks) = &self.super_blocks {
+            let neighbors = vec![Neighbor::new(self.position)];
 
-        if let Some(superblocks) = &self.super_blocks {
-            let mut superblock = superblocks
+            let superblock = super_blocks
                 .get(self.position)
-                .map_err(|_| anyhow::anyhow!("get superblock from file"))?;
-
-            // adaptive zero-padding
-            superblock.set_padded_size(self.max_superblock_size_in_epoch);
+                .map_err(|e| anyhow::anyhow!("get superblock from file: {e}"))?;
 
             let droplet = Droplet::new(self.position, neighbors, superblock);
 

@@ -6,7 +6,7 @@ use fountainhead::{
         compressor::{self, Compressor},
         decompressor::{self, Decompressor},
     },
-    encoder::{distribution::RobustSoliton, dummy_encoder::DummyEncoder},
+    encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
 };
 
 /// Number of worker threads for block validation
@@ -35,8 +35,11 @@ fn main() -> Result<()> {
     let output_data_dir = args[3].clone();
     let droplets_dir = args[4].clone();
 
-    let epochs_to_encode = 0; // 0 means the whole blockchain
-    let super_blocks_per_epoch = 1000; // TODO
+    // let epochs_to_encode = 3; // 0 means the whole blockchain
+    // let super_blocks_per_epoch = 200; // TODO
+
+    let epochs_to_encode = 2; // 0 means the whole blockchain
+    let super_blocks_per_epoch = 15; // TODO
 
     let compressor_config = compressor::Config {
         droplets_dir: droplets_dir.clone(),
@@ -47,6 +50,7 @@ fn main() -> Result<()> {
 
     let decompressor_config = decompressor::Config {
         droplets_dir,
+        super_blocks_per_epoch,
         output_data_dir,
         worker_threads: WORKER_THREADS,
     };
@@ -60,7 +64,8 @@ fn main() -> Result<()> {
         degree_distribution.min_encoded_symbols()
     );
 
-    let encoder = DummyEncoder::new(degree_distribution);
+    //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
+    let encoder = FountainEncoder::new(degree_distribution);
 
     if command == "compress" {
         let mut compressor =
