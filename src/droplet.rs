@@ -1,13 +1,12 @@
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use bitcoin_consensus_encoding as encoding;
-use bitcoinkernel::Block;
 
 use encoding::{
     CompactSizeDecoder, CompactSizeDecoderError, CompactSizeEncoder, Decodable, Decoder, Decoder3,
     Encodable, Encoder2, Encoder3, SliceEncoder, VecDecoder,
 };
 
-use crate::super_block::{EncodedBlocks, SuperBlock, SuperBlockDecoder, SuperBlockEncoder};
+use crate::super_block::{SuperBlock, SuperBlockDecoder, SuperBlockEncoder};
 
 #[derive(Clone)]
 pub struct Droplet {
@@ -42,27 +41,6 @@ impl Droplet {
 
     pub fn data_size(&self) -> usize {
         self.superblock.size()
-    }
-
-    /// Consumes the droplet and returns a vector of blocks
-    pub fn into_blocks(self) -> anyhow::Result<Vec<Block>> {
-        let mut blocks = Vec::new();
-
-        let encoded_blocks: EncodedBlocks =
-            encoding::decode_from_slice(self.superblock.into_encoded_bytes().as_ref())
-                .context("decode encoded blocks from droplet data")?;
-
-        let encoded_blocks = encoded_blocks.into_vec();
-
-        for enc_block in encoded_blocks {
-            blocks.push(
-                enc_block
-                    .to_block()
-                    .context("droplet: get block from encoded block")?,
-            )
-        }
-
-        Ok(blocks)
     }
 }
 

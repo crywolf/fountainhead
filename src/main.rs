@@ -38,8 +38,8 @@ fn main() -> Result<()> {
     // let epochs_to_encode = 3; // 0 means the whole blockchain
     // let super_blocks_per_epoch = 200; // TODO
 
-    let epochs_to_encode = 2; // 0 means the whole blockchain
-    let super_blocks_per_epoch = 15; // TODO
+    let epochs_to_encode = 3; // 0 means the whole blockchain
+    let super_blocks_per_epoch = 35; // TODO
 
     let compressor_config = compressor::Config {
         droplets_dir: droplets_dir.clone(),

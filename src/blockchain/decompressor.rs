@@ -75,22 +75,22 @@ impl Decompressor {
             // Iterate over all available droplets in epoch
             // We need blocks decoded in order, so we iterate from 0 to number of superblocks
             for superblock_num in 0..number_of_super_blocks {
-                //dbg!(superblock_num);
                 loop {
                     decoder
                         .decode()
                         .context("fountain decoder: recover blocks from droplets")?;
 
-                    if let Some(decoded_droplet) = decoder.get_decoded_droplet(superblock_num) {
+                    if let Some(decoded_superblock) = decoder.get_decoded_superblock(superblock_num)
+                    {
                         // Next necessary block was decoded,
                         // insert all its blocks into the blockchain
 
                         let num = superblock_num;
                         log::info!("- - - Blockchain: Adding superblock {num}");
 
-                        let blocks = decoded_droplet
+                        let blocks = decoded_superblock
                             .into_blocks()
-                            .context("get blocks from droplet");
+                            .context("get blocks from superblock");
 
                         match blocks {
                             Ok(_) => {}
@@ -105,21 +105,19 @@ impl Decompressor {
                             match self.output_chainman.inner.process_block(&block) {
                                 ProcessBlockResult::NewBlock => {
                                     log::debug!(
-                                        "<  Droplet #{num}: block #{i:<2} from superblock validated and written to disk"
+                                        "<  Superblock #{num}: block #{i:<2} validated and written to disk"
                                     )
                                 }
                                 ProcessBlockResult::Duplicate => {
                                     log::debug!(
-                                        "<  Droplet #{num}: block #{i:<2} from superblock already known (valid)"
+                                        "<  Superblock #{num}: block #{i:<2} already known (valid)"
                                     )
                                 }
                                 ProcessBlockResult::Rejected => {
                                     log::error!(
-                                        "!! Droplet #{num}: block #{i:<2} from superblock validation failed!"
+                                        "!! Superblock #{num}: block #{i:<2} validation failed!"
                                     );
-                                    bail!(
-                                        "Droplet #{num}: block #{i:<2} from superblock validation failed!"
-                                    )
+                                    bail!("Superblock #{num}: block #{i:<2} validation failed!")
                                 }
                             }
                         }
@@ -134,7 +132,7 @@ impl Decompressor {
                                 droplet_storage.get(added_droplets_count).with_context(|| {
                                     format!("get droplet {} from storage", added_droplets_count)
                                 })?;
-                            dbg!(droplet.superblock().clone().into_encoded_bytes().len());
+                            //log::warn!("xored sblk size: {}", droplet.superblock().size());
                             decoder
                                 .add_encoded_droplet(droplet)
                                 .context("add droplet to decoder")?;

@@ -7,7 +7,7 @@ use crate::{
     blockchain::{InputChainstateManager, print_progress},
     encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
     storage::{Storage, file_storage::FileStorage, tmp_file_storage::TmpFileStorage},
-    super_block::{EncodableBlock, SUPERBLOCK_SIZE, SuperBlock},
+    super_block::{EncodableBlock, SuperBlock},
 };
 
 pub struct Config {
@@ -160,7 +160,7 @@ impl Compressor {
                 block.size(),
             );
 
-            if superblock.size() + block.size() < SUPERBLOCK_SIZE {
+            if superblock.available_space() > block.size() {
                 // block fits in superblock => add it
                 log::debug!("  adding block {} to super block", height);
                 superblock
