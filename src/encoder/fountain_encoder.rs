@@ -53,10 +53,11 @@ where
                 .get(i)
                 .expect("Failed to get superblock {} from storage");
             println!(
-                "sblk: {}, blkcount: {}, size:{}, {:?}",
+                "sblk: {}, blkcount: {}, size: {}, blen: {}, {:?}",
                 superblock.num,
                 superblock.block_count(),
                 superblock.size(),
+                superblock.bytes_length,
                 &superblock.encoded_blocks_bytes[0..18],
             );
         }

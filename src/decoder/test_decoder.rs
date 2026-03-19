@@ -54,7 +54,7 @@ impl TestFountainDecoder {
     pub fn decode(&mut self) -> Result<HashMap<usize, Vec<u8>>, String> {
         // Iteratively apply belief propagation until no more progress
         let mut iterations = 0;
-        let max_iterations = self.encoded_symbols.len() * 10;
+        let max_iterations = self.encoded_symbols.len() * 2;
 
         loop {
             iterations += 1;

@@ -87,6 +87,14 @@ impl Decompressor {
 
                         let num = superblock_num;
                         log::info!("- - - Blockchain: Adding superblock {num}");
+                        // log::info!(
+                        //     "DECODED sblk: {}, blkcount: {}, size: {} blen: {}, {:?}",
+                        //     decoded_superblock.num,
+                        //     decoded_superblock.block_count(),
+                        //     decoded_superblock.size(),
+                        //     decoded_superblock.bytes_length,
+                        //     &decoded_superblock.encoded_blocks_bytes[0..18],
+                        // );
 
                         let blocks = decoded_superblock
                             .into_blocks()
@@ -100,6 +108,7 @@ impl Decompressor {
                             }
                         }
                         let blocks = blocks?;
+                        //log::info!("sblk: {}, blkcount: {}", num, blocks.len());
 
                         for (i, block) in blocks.into_iter().enumerate() {
                             match self.output_chainman.inner.process_block(&block) {

@@ -105,8 +105,8 @@ impl Compressor {
                 fs::read_to_string(last_block_file_path).unwrap_or_else(|_| "0".to_string());
             already_compressed_blocks = last_compressed_block
                 .parse::<usize>()
-                .context("parse last_compressed_block string")?
-                + 1;
+                .context("parse last_compressed_block string")?;
+            //+ 1;
 
             total_processed_blocks = already_compressed_blocks;
             processed_blocks_height = total_processed_blocks;

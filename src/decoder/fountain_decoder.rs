@@ -44,42 +44,41 @@ impl FountainDecoder {
             // If exactly one unknown neighbor of the droplet remains
             if unknown_neighbors.len() == 1 {
                 let unknown_neighbor = unknown_neighbors[0];
-                log::info!("> Unknown_neighbor: {}", unknown_neighbor);
-
-                // XOR out all droplet's known neighbors
-                let mut recovered_superblock = droplet.superblock().clone(); // TODO without cloning?
                 // log::info!(
-                //     "BEFORE XOR drp: {}, sblk: {}, neighbors: {:?}, blkcount: {}, size: {}",
-                //     droplet.num,
-                //     droplet.superblock().num,
-                //     droplet.neighbors(),
-                //     droplet.superblock().block_count(),
-                //     droplet.superblock().size(),
+                //     "> Last unknown_neighbor: {} for droplet {}",
+                //     unknown_neighbor,
+                //     droplet.num
                 // );
 
+                // XOR out all superblock's known neighbors
+                let mut unknown_superblock = droplet.superblock().clone();
+
+                // if unknown_neighbor == Neighbor::new(38) {
+                //     log::info!(
+                //         "BEFORE XOR drp: {}, sblk: {}, neighbors: {:?}, blkcount: {}, size: {}, blen: {}, {:?}",
+                //         droplet.num,
+                //         droplet.superblock().num,
+                //         droplet.neighbors(),
+                //         droplet.superblock().block_count(),
+                //         droplet.superblock().size(),
+                //         droplet.superblock().bytes_length,
+                //         &droplet.superblock().encoded_blocks_bytes[0..18],
+                //     );
+                // }
+
                 for &neighbor in &droplet.neighbors() {
-                    if let Some(known_superblock) =
-                        self.recovered_super_blocks.get(&neighbor.into())
+                    if let Some(known_neighbor) = self.recovered_super_blocks.get(&neighbor.into())
                     {
-                        recovered_superblock ^= known_superblock;
+                        unknown_superblock ^= known_neighbor;
                     }
                 }
 
-                // Add to droplet storage (indexed by superblock number)
-                // let recovered_droplet = Droplet::new(
-                //     unknown_neighbor.into(),
-                //     vec![unknown_neighbor],
-                //     recovered_superblock,
-                // );
-                log::info!(
-                    "INSERTING DECODED sblk: {}, blkcount: {}, size: {}, {:?}",
-                    recovered_superblock.num,
-                    recovered_superblock.block_count(),
-                    recovered_superblock.size(),
-                    &recovered_superblock.encoded_blocks_bytes[0..18],
-                );
+                //log::info!("Drp: {}, n: {:?}", droplet.num, droplet.neighbors());
+
+                //unknown_superblock.crop_padding();
+
                 self.recovered_super_blocks
-                    .insert(unknown_neighbor.into(), recovered_superblock);
+                    .insert(unknown_neighbor.into(), unknown_superblock);
             }
         }
 
