@@ -64,8 +64,11 @@ where
             let neighbors = vec![Neighbor::new(self.position)];
 
             let superblock = super_blocks
-                .get(self.position)
+                .get(&self.position)
                 .map_err(|e| anyhow::anyhow!("get superblock from file: {e}"))?;
+
+            let superblock = superblock
+                .ok_or_else(|| anyhow::anyhow!("Superblock {} not found", self.position))?;
 
             let droplet = Droplet::new(self.position, neighbors, superblock);
 

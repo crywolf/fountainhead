@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::droplet::{Droplet, Neighbor};
+use crate::storage::Storage;
+use crate::storage::tmp_file_storage::TmpFileStorage;
 use crate::super_block::SuperBlock;
 
 /// Fountain decoder is a peeling decoder for a Luby Transform (LT) code.
@@ -11,16 +13,20 @@ pub struct FountainDecoder {
     /// Received encoded symbols (droplets)
     encoded_droplets: Vec<Droplet>,
     /// Decoded superblocks (indexed by superblock number)
-    recovered_super_blocks: HashMap<usize, SuperBlock>,
+    recovered_super_blocks: TmpFileStorage,
+    /// Already decoded neighbors
+    known_neighbors: HashSet<usize>,
 }
 
 impl FountainDecoder {
     /// Create a new decoder
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
             encoded_droplets: Vec::new(),
-            recovered_super_blocks: HashMap::new(),
-        }
+            recovered_super_blocks: TmpFileStorage::new()
+                .context("FountainDecoder: Failed to create superblocks storage")?,
+            known_neighbors: HashSet::new(),
+        })
     }
 
     /// Add a droplet
@@ -38,7 +44,7 @@ impl FountainDecoder {
                 .neighbors()
                 .iter()
                 .copied()
-                .filter(|&neighbor| !self.recovered_super_blocks.contains_key(&neighbor.into()))
+                .filter(|&neighbor| !self.known_neighbors.contains(&neighbor.into()))
                 .collect();
 
             // If exactly one unknown neighbor of the droplet remains
@@ -67,7 +73,15 @@ impl FountainDecoder {
                 // }
 
                 for &neighbor in &droplet.neighbors() {
-                    if let Some(known_neighbor) = self.recovered_super_blocks.get(&neighbor.into())
+                    if let Some(known_neighbor) = self
+                        .recovered_super_blocks
+                        .get(&neighbor.into())
+                        .with_context(|| {
+                            format!(
+                                "FountainDecoder: Failed to get known neighbor {} from storage",
+                                neighbor
+                            )
+                        })?
                     {
                         unknown_superblock ^= known_neighbor;
                     }
@@ -78,7 +92,10 @@ impl FountainDecoder {
                 //unknown_superblock.crop_padding();
 
                 self.recovered_super_blocks
-                    .insert(unknown_neighbor.into(), unknown_superblock);
+                    .insert(&unknown_neighbor.into(), unknown_superblock)
+                    .context("insert recovered superblock to storage")?;
+
+                self.known_neighbors.insert(unknown_neighbor.into());
             }
         }
 
@@ -86,13 +103,12 @@ impl FountainDecoder {
     }
 
     /// Returns decoded superblock
-    pub fn get_decoded_superblock(&mut self, num: usize) -> Option<SuperBlock> {
-        self.recovered_super_blocks.get(&num).cloned()
-    }
-}
-
-impl Default for FountainDecoder {
-    fn default() -> Self {
-        Self::new()
+    pub fn get_decoded_superblock(&mut self, num: usize) -> Result<Option<SuperBlock>> {
+        self.recovered_super_blocks.get(&num).with_context(|| {
+            format!(
+                "FountainDecoder: Failed to get recovered superblock {} from storage",
+                num
+            )
+        })
     }
 }

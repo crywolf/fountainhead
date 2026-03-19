@@ -15,11 +15,11 @@ pub struct DummyDecoder {
 
 impl DummyDecoder {
     /// Create a new decoder
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
             droplets: Vec::new(),
             recovered_super_blocks: BTreeMap::new(),
-        }
+        })
     }
 
     /// Add a droplet
@@ -64,11 +64,5 @@ impl DummyDecoder {
         } else {
             None
         }
-    }
-}
-
-impl Default for DummyDecoder {
-    fn default() -> Self {
-        Self::new()
     }
 }

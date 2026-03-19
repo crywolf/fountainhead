@@ -174,7 +174,7 @@ impl Compressor {
                 );
 
                 superblock_storage
-                    .insert(super_blocks_count, superblock)
+                    .insert(&super_blocks_count, superblock)
                     .context("insert superblock")?;
 
                 if super_blocks_count.is_multiple_of(50) {
@@ -213,7 +213,7 @@ impl Compressor {
                 log::debug!("  adding block {} to super block", height);
 
                 superblock_storage
-                    .insert(super_blocks_count, superblock)
+                    .insert(&super_blocks_count, superblock)
                     .context("insert superblock")?;
 
                 super_blocks_count += 1;
@@ -248,7 +248,7 @@ impl Compressor {
                     );
 
                     droplet_storage
-                        .insert(droplet_num, droplet)
+                        .insert(&droplet_num, droplet)
                         .context("store droplet")?;
 
                     if num.is_multiple_of(50) {

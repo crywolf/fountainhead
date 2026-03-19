@@ -50,8 +50,9 @@ where
         // TODO - dbg
         for i in 0..superblock_storage.count() {
             let superblock = superblock_storage
-                .get(i)
+                .get(&i)
                 .expect("Failed to get superblock {} from storage");
+            let superblock = superblock.expect("Not found");
             println!(
                 "sblk: {}, blkcount: {}, size: {}, blen: {}, {:?}",
                 superblock.num,
@@ -98,9 +99,12 @@ where
         let mut encoded_superblock = SuperBlock::new(0);
 
         for neighbor in neighbors.iter() {
-            let superblock = storage.get(neighbor.into()).map_err(|_| {
+            let superblock = storage.get(&neighbor.into()).map_err(|_| {
                 anyhow::anyhow!("Failed to get superblock {} from storage", neighbor)
             })?;
+
+            let superblock =
+                superblock.ok_or_else(|| anyhow::anyhow!("Superblock {} not found", neighbor))?;
 
             encoded_superblock ^= superblock; // XORed_superblock is zero-padded to the biggest of the selected superblocks (neighbor)
         }

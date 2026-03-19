@@ -37,8 +37,8 @@ impl TmpFileStorage {
 impl Storage<usize, SuperBlock> for TmpFileStorage {
     type Error = anyhow::Error;
 
-    fn insert(&mut self, key: usize, sb: SuperBlock) -> Result<()> {
-        let filepath = self.filepath(key);
+    fn insert(&mut self, key: &usize, sb: SuperBlock) -> Result<()> {
+        let filepath = self.filepath(*key);
         let tmp_file = fs::File::create(filepath).context("create superblock file")?;
         let writer = BufWriter::new(tmp_file);
         self.counter += 1;
@@ -51,9 +51,14 @@ impl Storage<usize, SuperBlock> for TmpFileStorage {
         encoding::encode_to_writer(&sb, writer).context("write superblock into a file")
     }
 
-    fn get(&self, key: usize) -> Result<SuperBlock> {
-        let filepath = self.filepath(key);
-        let tmp_file = fs::File::open(filepath).context("read superblock file")?;
+    fn get(&self, key: &usize) -> Result<Option<SuperBlock>> {
+        let filepath = self.filepath(*key);
+        let tmp_file = fs::File::open(filepath).context("read superblock file");
+        let tmp_file = match tmp_file {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+
         let reader = BufReader::new(tmp_file);
 
         let sb = match encoding::decode_from_read(reader) {
@@ -61,7 +66,7 @@ impl Storage<usize, SuperBlock> for TmpFileStorage {
             Err(e) => anyhow::bail!("error decoding superblock file: {}", e),
         };
 
-        Ok(sb)
+        Ok(Some(sb))
     }
 
     fn count(&self) -> usize {

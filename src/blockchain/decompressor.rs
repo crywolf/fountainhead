@@ -58,7 +58,7 @@ impl Decompressor {
             log::info!("Restoring epoch #{epoch}");
 
             //let mut decoder = crate::decoder::dummy_decoder::DummyDecoder::new(); // TODO
-            let mut decoder = FountainDecoder::new();
+            let mut decoder = FountainDecoder::new()?;
 
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                 .with_context(|| format!("open droplet storage for epoch {}", epoch))?;
@@ -80,13 +80,15 @@ impl Decompressor {
                         .decode()
                         .context("fountain decoder: recover blocks from droplets")?;
 
-                    if let Some(decoded_superblock) = decoder.get_decoded_superblock(superblock_num)
+                    if let Some(decoded_superblock) = decoder
+                        .get_decoded_superblock(superblock_num)
+                        .context("get_decoded_superblock")?
                     {
                         // Next necessary block was decoded,
                         // insert all its blocks into the blockchain
 
                         let num = superblock_num;
-                        log::info!("- - - Blockchain: Adding superblock {num}");
+                        // log::info!("- - - Blockchain: Adding superblock {num}");
                         // log::info!(
                         //     "DECODED sblk: {}, blkcount: {}, size: {} blen: {}, {:?}",
                         //     decoded_superblock.num,
@@ -135,12 +137,19 @@ impl Decompressor {
                     } else {
                         // Add another droplet to the decoder
 
-                        log::info!("Add droplet to decoder: {}", added_droplets_count);
+                        //log::info!("Add droplet to decoder: {}", added_droplets_count);
                         if added_droplets_count < number_of_droplets {
                             let droplet =
-                                droplet_storage.get(added_droplets_count).with_context(|| {
-                                    format!("get droplet {} from storage", added_droplets_count)
-                                })?;
+                                droplet_storage
+                                    .get(&added_droplets_count)
+                                    .with_context(|| {
+                                        format!("get droplet {} from storage", added_droplets_count)
+                                    })?;
+
+                            let droplet = droplet.ok_or_else(|| {
+                                anyhow::anyhow!("droplet {} not found", added_droplets_count)
+                            })?;
+
                             //log::warn!("xored sblk size: {}", droplet.superblock().size());
                             decoder
                                 .add_encoded_droplet(droplet)

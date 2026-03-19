@@ -52,8 +52,8 @@ impl FileStorage {
 impl Storage<usize, Droplet> for FileStorage {
     type Error = anyhow::Error;
 
-    fn insert(&mut self, key: usize, droplet: Droplet) -> Result<()> {
-        let filepath = self.filepath(key);
+    fn insert(&mut self, key: &usize, droplet: Droplet) -> Result<()> {
+        let filepath = self.filepath(*key);
         let file = fs::File::create(filepath).context("FileStorage: create droplet file")?;
         let writer = BufWriter::new(file);
         self.counter += 1;
@@ -67,9 +67,14 @@ impl Storage<usize, Droplet> for FileStorage {
             .context("FileStorage: write droplet into a file")
     }
 
-    fn get(&self, key: usize) -> Result<Droplet> {
-        let filepath = self.filepath(key);
-        let file = fs::File::open(filepath).context("FileStorage: read droplet file")?;
+    fn get(&self, key: &usize) -> Result<Option<Droplet>> {
+        let filepath = self.filepath(*key);
+        let file = fs::File::open(filepath).context("FileStorage: read droplet file");
+        let file = match file {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+
         let reader = BufReader::new(file);
 
         let droplet = match encoding::decode_from_read(reader) {
@@ -77,7 +82,7 @@ impl Storage<usize, Droplet> for FileStorage {
             Err(e) => anyhow::bail!("FileStorage: error decoding droplet file: {}", e),
         };
 
-        Ok(droplet)
+        Ok(Some(droplet))
     }
 
     fn count(&self) -> usize {
