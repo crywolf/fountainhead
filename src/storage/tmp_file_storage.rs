@@ -14,7 +14,7 @@ pub struct TmpFileStorage {
 
 impl TmpFileStorage {
     pub fn new() -> Result<Self> {
-        // Create a directory inside of `env::temp_dir()
+        // Create a directory inside of `env::temp_dir()`
         let dir = tempdir()?;
 
         Ok(Self {

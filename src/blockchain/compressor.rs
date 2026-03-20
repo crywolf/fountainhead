@@ -7,7 +7,7 @@ use crate::{
     blockchain::{InputChainstateManager, print_progress},
     encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
     storage::{Storage, file_storage::FileStorage, tmp_file_storage::TmpFileStorage},
-    super_block::{EncodableBlock, SuperBlock},
+    super_block::{RawBlock, SuperBlock},
 };
 
 pub struct Config {
@@ -134,7 +134,7 @@ impl Compressor {
 
         // Start compression
         log::info!(
-            "Compressing epoch #{epoch}, starting at block height: {}",
+            "Constructing superblocks for epoch #{epoch}, starting at block height: {}",
             already_compressed_blocks
         );
 
@@ -152,7 +152,7 @@ impl Compressor {
                 .read_block_data(&entry)
                 .context("read block data")?;
 
-            let block = EncodableBlock::new(block);
+            let block = RawBlock::new(&block.consensus_encode().expect("should be valid block"));
 
             log::debug!(
                 "current superblock len {}, block_size {}",
@@ -160,7 +160,7 @@ impl Compressor {
                 block.size(),
             );
 
-            if superblock.available_space() > block.size() {
+            if superblock.available_space() >= block.size() {
                 // block fits in superblock => add it
                 log::debug!("  adding block {} to super block", height);
                 superblock
@@ -177,7 +177,7 @@ impl Compressor {
                     .insert(&super_blocks_count, superblock)
                     .context("insert superblock")?;
 
-                if super_blocks_count.is_multiple_of(50) {
+                if super_blocks_count.is_multiple_of(20) {
                     print_progress();
                 }
                 super_blocks_count += 1;
@@ -251,7 +251,7 @@ impl Compressor {
                         .insert(&droplet_num, droplet)
                         .context("store droplet")?;
 
-                    if num.is_multiple_of(50) {
+                    if num.is_multiple_of(20) {
                         print_progress();
                     }
                 }

@@ -50,27 +50,9 @@ impl FountainDecoder {
             // If exactly one unknown neighbor of the droplet remains
             if unknown_neighbors.len() == 1 {
                 let unknown_neighbor = unknown_neighbors[0];
-                // log::info!(
-                //     "> Last unknown_neighbor: {} for droplet {}",
-                //     unknown_neighbor,
-                //     droplet.num
-                // );
 
                 // XOR out all superblock's known neighbors
-                let mut unknown_superblock = droplet.superblock().clone();
-
-                // if unknown_neighbor == Neighbor::new(38) {
-                //     log::info!(
-                //         "BEFORE XOR drp: {}, sblk: {}, neighbors: {:?}, blkcount: {}, size: {}, blen: {}, {:?}",
-                //         droplet.num,
-                //         droplet.superblock().num,
-                //         droplet.neighbors(),
-                //         droplet.superblock().block_count(),
-                //         droplet.superblock().size(),
-                //         droplet.superblock().bytes_length,
-                //         &droplet.superblock().encoded_blocks_bytes[0..18],
-                //     );
-                // }
+                let mut unknown_superblock = droplet.xored_superblock().clone();
 
                 for &neighbor in &droplet.neighbors() {
                     if let Some(known_neighbor) = self
@@ -86,10 +68,6 @@ impl FountainDecoder {
                         unknown_superblock ^= known_neighbor;
                     }
                 }
-
-                //log::info!("Drp: {}, n: {:?}", droplet.num, droplet.neighbors());
-
-                //unknown_superblock.crop_padding();
 
                 self.recovered_super_blocks
                     .insert(&unknown_neighbor.into(), unknown_superblock)

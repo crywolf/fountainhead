@@ -1,10 +1,13 @@
+use std::io::{Cursor, Read};
+
 use anyhow::{Context, Result};
 use bitcoin_consensus_encoding as encoding;
 use bitcoinkernel::Block;
+use encoding::CompactSizeDecoderError;
 
 use encoding::{
     ByteVecDecoder, BytesEncoder, CompactSizeDecoder, CompactSizeEncoder, Decodable, Decoder,
-    Decoder4, Encodable, Encoder, Encoder2, Encoder4, VecDecoder,
+    Decoder2, Decoder3, Encodable, Encoder2, Encoder4, SliceEncoder, VecDecoder,
 };
 
 /// NOTE: 4_000_000 is the limit that can be decoded using [`bitcoin_consensus_encoding::ByteVecDecoder`]
@@ -18,100 +21,97 @@ pub struct SuperBlock {
     /// Number of blocks included in this superblock
     block_count: usize,
     /// Length of encoded bytes
-    pub bytes_length: usize, // TODO pub
-    /// Concatenated consensus-encoded blocks
-    pub encoded_blocks_bytes: Vec<u8>, // TODO pub
+    bytes_length: usize,
+    /// Sizes of individual blocks
+    block_sizes: Vec<Size>,
+    /// Concatenated consensus-encoded blocks (raw block bytes)
+    pub raw_bytes: Vec<u8>, // TODO pub
 }
 
 impl SuperBlock {
+    /// Creates new superblock with the given number
     pub fn new(num: usize) -> Self {
         Self {
             num,
             block_count: 0,
             bytes_length: 0,
-            encoded_blocks_bytes: Vec::with_capacity(SUPERBLOCK_MAX_SIZE),
+            block_sizes: Vec::new(),
+            raw_bytes: Vec::with_capacity(SUPERBLOCK_MAX_SIZE),
         }
     }
 
-    pub fn add(&mut self, encodable_block: EncodableBlock) -> Result<()> {
-        let block_bytes = encoding::encode_to_vec(&encodable_block);
+    /// Ads new block to superblock
+    pub fn add(&mut self, raw_block: RawBlock) -> Result<()> {
+        let block_bytes = raw_block.raw_bytes;
+        let block_size = block_bytes.len();
 
-        // Concatenated block bytes, each block prefixed with compact-size length
-        self.encoded_blocks_bytes.extend_from_slice(&block_bytes);
-        self.bytes_length = self.encoded_blocks_bytes.len();
+        if self.available_space() < block_size {
+            anyhow::bail!(
+                "Not enough space in superblock; needed: {}. available: {}",
+                block_size,
+                self.available_space(),
+            );
+        }
+
+        self.block_sizes.push(Size(block_size));
+
+        // Concatenated block bytes
+        self.raw_bytes.extend_from_slice(&block_bytes);
+        self.bytes_length = self.raw_bytes.len();
 
         self.block_count += 1;
 
         Ok(())
     }
 
-    /// Byte length of currently encoded blocks in superblock
+    /// Byte length of currently included blocks in the superblock
     pub fn size(&self) -> usize {
-        self.encoded_blocks_bytes.len()
+        self.raw_bytes.len()
     }
 
-    /// Returns amount of bytes that can be added to the superblock (size of the superblock is limited by [`SUPERBLOCK_SIZE`])
+    /// Returns amount of bytes that can be added to the superblock (size of the superblock is limited by [`SUPERBLOCK_MAX_SIZE`])
     pub fn available_space(&self) -> usize {
-        SUPERBLOCK_MAX_SIZE - self.encoded_blocks_bytes.len()
-    }
-
-    /// Consensus-encode concatenated block bytes
-    pub fn into_consensus_bytes(mut self) -> Vec<u8> {
-        // encode as a vector of bytes with items count at the beginning
-        let mut encoded_blocks_vec_with_count =
-            Vec::with_capacity(self.encoded_blocks_bytes.len() + 10);
-
-        let count_encoder = CompactSizeEncoder::new(self.block_count);
-        let encoded_block_count = count_encoder.current_chunk();
-        encoded_blocks_vec_with_count.extend_from_slice(encoded_block_count);
-
-        encoded_blocks_vec_with_count.append(&mut self.encoded_blocks_bytes);
-
-        encoded_blocks_vec_with_count
+        SUPERBLOCK_MAX_SIZE - self.raw_bytes.len()
     }
 
     /// Consumes self and returns a vector of blocks
-    pub fn into_blocks(self) -> anyhow::Result<Vec<Block>> {
-        let mut blocks = Vec::new();
+    pub fn into_blocks(mut self) -> anyhow::Result<Vec<RawBlock>> {
+        self.crop_padding();
 
-        let encoded_blocks: EncodedBlocks =
-            encoding::decode_from_slice(self.into_consensus_bytes().as_ref())
-                .context("decode encoded blocks from superblock's data")?;
+        let mut blocks = Vec::with_capacity(self.block_count());
 
-        let encoded_blocks = encoded_blocks.into_vec();
+        let mut bytes = Cursor::new(&self.raw_bytes);
 
-        for enc_block in encoded_blocks {
-            blocks.push(
-                enc_block
-                    .to_block()
-                    .context("superblock: get raw block from encoded block")?,
-            )
+        for size in self.block_sizes {
+            let mut raw_bytes = vec![0u8; size.into()];
+            bytes
+                .read_exact(&mut raw_bytes)
+                .context("read raw block bytes")?;
+
+            let block = RawBlock::new(&raw_bytes);
+            blocks.push(block);
         }
 
         Ok(blocks)
     }
 
+    /// Removes extra zero-padding added to during XOR operation (vectors must have the same length)
     pub fn crop_padding(&mut self) {
-        self.encoded_blocks_bytes.truncate(self.bytes_length);
-        // let v = self
-        //     .encoded_blocks_bytes
-        //     .drain(self.bytes_length..)
-        //     .filter(|&e| e != 0)
-        //     .count();
-        // //assert_eq!(v, 0);
-        // if v != 0 {
-        //     log::error!("CROP failed, {v}");
-        // }
+        self.raw_bytes.truncate(self.bytes_length);
+        self.block_sizes.truncate(self.block_count());
     }
 
+    /// Returns number of blocks
     pub fn block_count(&self) -> usize {
         self.block_count
     }
 
+    /// Encodes the superblock into a vector
     pub fn encode_to_bytes(self) -> Vec<u8> {
         encoding::encode_to_vec(&self)
     }
 
+    /// Decodes the superblock from a byte slice
     pub fn decode_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         encoding::decode_from_slice(bytes)
     }
@@ -123,16 +123,20 @@ impl std::ops::BitXorAssign for SuperBlock {
         self.block_count ^= rhs.block_count;
         self.bytes_length ^= rhs.bytes_length;
 
-        let max_len = std::cmp::max(
-            self.encoded_blocks_bytes.len(),
-            rhs.encoded_blocks_bytes.len(),
-        );
+        let max_sizes_len = std::cmp::max(self.block_sizes.len(), rhs.block_sizes.len());
+        let padding = max_sizes_len - self.block_sizes.len();
+        self.block_sizes.append(&mut vec![Size(0); padding]);
 
-        let padding = max_len - self.encoded_blocks_bytes.len();
-        self.encoded_blocks_bytes.append(&mut vec![0u8; padding]);
+        for i in 0..rhs.block_sizes.len() {
+            self.block_sizes[i] ^= rhs.block_sizes[i]
+        }
 
-        for i in 0..rhs.encoded_blocks_bytes.len() {
-            self.encoded_blocks_bytes[i] ^= rhs.encoded_blocks_bytes[i]
+        let max_bytes_len = std::cmp::max(self.raw_bytes.len(), rhs.raw_bytes.len());
+        let padding = max_bytes_len - self.raw_bytes.len();
+        self.raw_bytes.append(&mut vec![0; padding]);
+
+        for i in 0..rhs.raw_bytes.len() {
+            self.raw_bytes[i] ^= rhs.raw_bytes[i]
         }
     }
 }
@@ -143,23 +147,123 @@ impl<'a> std::ops::BitXorAssign<&'a SuperBlock> for SuperBlock {
         self.block_count ^= rhs.block_count;
         self.bytes_length ^= rhs.bytes_length;
 
-        let max_len = std::cmp::max(
-            self.encoded_blocks_bytes.len(),
-            rhs.encoded_blocks_bytes.len(),
-        );
+        let max_sizes_len = std::cmp::max(self.block_sizes.len(), rhs.block_sizes.len());
+        let padding = max_sizes_len - self.block_sizes.len();
+        self.block_sizes.append(&mut vec![Size(0); padding]);
 
-        let padding = max_len - self.encoded_blocks_bytes.len();
-        self.encoded_blocks_bytes.append(&mut vec![0u8; padding]);
+        for i in 0..rhs.block_sizes.len() {
+            self.block_sizes[i] ^= rhs.block_sizes[i]
+        }
 
-        for i in 0..rhs.encoded_blocks_bytes.len() {
-            self.encoded_blocks_bytes[i] ^= rhs.encoded_blocks_bytes[i]
+        let max_bytes_len = std::cmp::max(self.raw_bytes.len(), rhs.raw_bytes.len());
+        let padding = max_bytes_len - self.raw_bytes.len();
+        self.raw_bytes.append(&mut vec![0; padding]);
+
+        for i in 0..rhs.raw_bytes.len() {
+            self.raw_bytes[i] ^= rhs.raw_bytes[i]
         }
     }
 }
 
+/// Container for block serialized to Bitcoin wire data format
+#[derive(Debug, PartialEq)]
+pub struct RawBlock {
+    raw_bytes: Vec<u8>,
+}
+
+impl RawBlock {
+    pub fn new(raw_bytes: &[u8]) -> Self {
+        Self {
+            raw_bytes: raw_bytes.to_vec(),
+        }
+    }
+
+    /// Returns size of block data
+    pub fn size(&self) -> usize {
+        self.raw_bytes.len()
+    }
+
+    /// Returns [`bitcoinkernel::Block`]
+    pub fn to_block(&self) -> Result<Block> {
+        Block::new(&self.raw_bytes).context("new block from encodable block")
+    }
+}
+
+/// Size of individual block
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Size(usize);
+
+impl From<usize> for Size {
+    fn from(value: usize) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Size> for usize {
+    fn from(value: Size) -> Self {
+        value.0
+    }
+}
+
+impl From<&Size> for usize {
+    fn from(value: &Size) -> Self {
+        value.0
+    }
+}
+
+impl std::ops::BitXorAssign for Size {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0
+    }
+}
+
+encoding::encoder_newtype! {
+    /// The encoder for the [`Size`] type.
+    pub struct SizeEncoder<'e>(CompactSizeEncoder);
+}
+
+impl Encodable for Size {
+    type Encoder<'e> = SizeEncoder<'e>;
+
+    fn encoder(&self) -> Self::Encoder<'_> {
+        SizeEncoder::new(CompactSizeEncoder::new(self.0))
+    }
+}
+
+impl Decodable for Size {
+    type Decoder = SizeDecoder;
+
+    fn decoder() -> Self::Decoder {
+        SizeDecoder(CompactSizeDecoder::new_with_limit(usize::MAX))
+    }
+}
+
+/// The decoder for the [`Size`] type.
+pub struct SizeDecoder(CompactSizeDecoder);
+
+impl Decoder for SizeDecoder {
+    type Output = Size;
+    type Error = CompactSizeDecoderError;
+
+    fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
+        self.0.push_bytes(bytes)
+    }
+
+    fn end(self) -> std::result::Result<Self::Output, Self::Error> {
+        Ok(Size(self.0.end()?))
+    }
+
+    fn read_limit(&self) -> usize {
+        self.0.read_limit()
+    }
+}
+
+type RawBytesEncoder<'e> = Encoder2<CompactSizeEncoder, BytesEncoder<'e>>;
+type SizesEncoder<'e> = Encoder2<CompactSizeEncoder, SliceEncoder<'e, Size>>;
+
 encoding::encoder_newtype! {
     /// The encoder for the [`SuperBlock`] type.
-    pub struct SuperBlockEncoder<'e>(Encoder4<CompactSizeEncoder, CompactSizeEncoder, CompactSizeEncoder, Encoder2<CompactSizeEncoder, BytesEncoder<'e>>>);
+    pub struct SuperBlockEncoder<'e>(Encoder2<Encoder4<CompactSizeEncoder, CompactSizeEncoder, CompactSizeEncoder, SizesEncoder<'e>>, RawBytesEncoder<'e>>);
 }
 
 impl Encodable for SuperBlock {
@@ -173,39 +277,44 @@ impl Encodable for SuperBlock {
         let block_count = CompactSizeEncoder::new(self.block_count);
         let bytes_length = CompactSizeEncoder::new(self.bytes_length);
 
-        let encoded_blocks_bytes = Encoder2::new(
-            CompactSizeEncoder::new(self.encoded_blocks_bytes.len()),
-            BytesEncoder::without_length_prefix(self.encoded_blocks_bytes.as_ref()),
+        let block_sizes = Encoder2::new(
+            CompactSizeEncoder::new(self.block_sizes.len()),
+            SliceEncoder::without_length_prefix(self.block_sizes.as_ref()),
         );
 
-        SuperBlockEncoder::new(Encoder4::new(
-            num,
-            block_count,
-            bytes_length,
-            encoded_blocks_bytes,
-        ))
+        let enc1 = Encoder4::new(num, block_count, bytes_length, block_sizes);
+
+        let raw_bytes = Encoder2::new(
+            CompactSizeEncoder::new(self.raw_bytes.len()),
+            BytesEncoder::without_length_prefix(self.raw_bytes.as_ref()),
+        );
+
+        SuperBlockEncoder::new(Encoder2::new(enc1, raw_bytes))
     }
 }
 
 /// The decoder for the [`SuperBlock`] type.
 pub struct SuperBlockDecoder(
-    Decoder4<CompactSizeDecoder, CompactSizeDecoder, CompactSizeDecoder, ByteVecDecoder>,
+    Decoder2<
+        Decoder3<CompactSizeDecoder, CompactSizeDecoder, CompactSizeDecoder>,
+        Decoder2<VecDecoder<Size>, ByteVecDecoder>,
+    >,
 );
 
 impl Decodable for SuperBlock {
     type Decoder = SuperBlockDecoder;
 
     fn decoder() -> Self::Decoder {
-        let num = CompactSizeDecoder::new();
-        let block_count = CompactSizeDecoder::new();
+        let num = CompactSizeDecoder::new_with_limit(usize::MAX);
+        let block_count = CompactSizeDecoder::new_with_limit(usize::MAX);
         let bytes_length = CompactSizeDecoder::new_with_limit(usize::MAX);
-        let encoded_blocks_bytes = ByteVecDecoder::new();
 
-        SuperBlockDecoder(Decoder4::new(
-            num,
-            block_count,
-            bytes_length,
-            encoded_blocks_bytes,
+        let block_sizes = VecDecoder::new();
+        let raw_bytes = ByteVecDecoder::new();
+
+        SuperBlockDecoder(Decoder2::new(
+            Decoder3::new(num, block_count, bytes_length),
+            Decoder2::new(block_sizes, raw_bytes),
         ))
     }
 }
@@ -219,130 +328,14 @@ impl Decoder for SuperBlockDecoder {
     }
 
     fn end(self) -> std::result::Result<Self::Output, Self::Error> {
-        let (num, block_count, bytes_length, encoded_blocks_bytes) = self.0.end()?;
+        let ((num, block_count, bytes_length), (block_sizes, raw_bytes)) = self.0.end()?;
 
         Ok(SuperBlock {
             num,
             block_count,
             bytes_length,
-            encoded_blocks_bytes,
-        })
-    }
-
-    fn read_limit(&self) -> usize {
-        self.0.read_limit()
-    }
-}
-
-/// Decodable collection of [`EncodableBlock`]s
-pub struct EncodedBlocks(Vec<EncodableBlock>);
-
-impl EncodedBlocks {
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn into_vec(self) -> Vec<EncodableBlock> {
-        self.0
-    }
-}
-
-/// The decoder for the [`EncodedBlocks`] type.
-pub struct EncodedBlocksDecoder(VecDecoder<EncodableBlock>);
-
-impl Decodable for EncodedBlocks {
-    type Decoder = EncodedBlocksDecoder;
-
-    fn decoder() -> Self::Decoder {
-        EncodedBlocksDecoder(VecDecoder::new())
-    }
-}
-
-impl Decoder for EncodedBlocksDecoder {
-    type Output = EncodedBlocks;
-    type Error = anyhow::Error;
-
-    fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
-        self.0
-            .push_bytes(bytes)
-            .context("EncodedBlocksDecoder: push_bytes()")
-    }
-
-    fn end(self) -> std::result::Result<Self::Output, Self::Error> {
-        Ok(EncodedBlocks(
-            self.0.end().context("EncodedBlocksDecoder: end()")?,
-        ))
-    }
-
-    fn read_limit(&self) -> usize {
-        self.0.read_limit()
-    }
-}
-
-/// Container for block serialized to Bitcoin wire format
-#[derive(Debug, PartialEq)]
-pub struct EncodableBlock {
-    data: Vec<u8>,
-}
-
-impl EncodableBlock {
-    pub fn new(block: Block) -> Self {
-        let data = block.consensus_encode().expect("should be valid block");
-
-        Self { data }
-    }
-
-    /// Returns size of consensus-encoded block data
-    pub fn size(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn to_block(&self) -> Result<Block> {
-        Block::new(&self.data).context("new block from encodable block")
-    }
-}
-
-encoding::encoder_newtype! {
-    /// The encoder for the [`EncodableBlock`] type.
-    pub struct BlockEncoder<'e>(Encoder2<CompactSizeEncoder, BytesEncoder<'e>>);
-}
-
-impl Encodable for EncodableBlock {
-    type Encoder<'e> = BlockEncoder<'e>;
-
-    fn encoder(&self) -> Self::Encoder<'_> {
-        let block_encoder = Encoder2::new(
-            CompactSizeEncoder::new(self.data.len()),
-            BytesEncoder::without_length_prefix(&self.data),
-        );
-
-        BlockEncoder::new(block_encoder)
-    }
-}
-
-impl Decodable for EncodableBlock {
-    type Decoder = EncodableBlockDecoder;
-
-    fn decoder() -> Self::Decoder {
-        EncodableBlockDecoder(ByteVecDecoder::new())
-    }
-}
-
-/// The decoder for the [`EncodableBlock`] type.
-pub struct EncodableBlockDecoder(ByteVecDecoder);
-
-impl Decoder for EncodableBlockDecoder {
-    type Output = EncodableBlock;
-    type Error = bitcoin_consensus_encoding::ByteVecDecoderError;
-
-    fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
-        self.0.push_bytes(bytes)
-    }
-
-    fn end(self) -> std::result::Result<Self::Output, Self::Error> {
-        Ok(EncodableBlock {
-            data: self.0.end()?,
+            block_sizes,
+            raw_bytes,
         })
     }
 
@@ -356,16 +349,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_encodable_block() {
-        let input_data = Vec::from(b"Some block data");
-        let eb = EncodableBlock {
-            data: input_data.clone(),
-        };
+    fn test_superblock() {
+        let block1 = Vec::from(b"Some block data");
+        let block2 = Vec::from(b"Another block");
+        let block3 = Vec::from(b"Last and longest block");
+        let b1 = RawBlock::new(&block1);
+        let b2 = RawBlock::new(&block2);
+        let b3 = RawBlock::new(&block3);
 
-        let encoded = encoding::encode_to_vec(&eb);
+        let mut sb = SuperBlock::new(50);
+        sb.add(b1).unwrap();
+        sb.add(b2).unwrap();
+        sb.add(b3).unwrap();
 
-        let decoded: EncodableBlock = encoding::decode_from_slice(&encoded).unwrap();
-        assert_eq!(decoded.data, input_data);
+        let encoded_bytes = encoding::encode_to_vec(&sb);
+        let decoded: SuperBlock = encoding::decode_from_slice(&encoded_bytes).unwrap();
+
+        assert_eq!(&decoded, &sb);
+
+        let expected_blocks = sb.into_blocks().unwrap();
+        let decoded_blocks = decoded.into_blocks().unwrap();
+
+        assert_eq!(decoded_blocks, expected_blocks);
     }
 
     #[test]
@@ -373,24 +378,27 @@ mod tests {
         let mut shorter = SuperBlock {
             num: 41,
             block_count: 24259,
-            encoded_blocks_bytes: Vec::from(b"Some data bytes"),
+            raw_bytes: Vec::from(b"Some data bytes"),
             bytes_length: 15,
+            block_sizes: vec![Size(15)],
         };
         let longer = SuperBlock {
             num: 1100,
             block_count: 3,
-            encoded_blocks_bytes: Vec::from(b"Some much longer data bytes"),
+            raw_bytes: Vec::from(b"Some much longer data bytes"),
             bytes_length: 27,
+            block_sizes: vec![Size(27)],
         };
         let mut longest = SuperBlock {
             num: 1100,
             block_count: 58962,
-            encoded_blocks_bytes: Vec::from(b"Message with the longest data bytes"),
+            raw_bytes: Vec::from(b"Message with the longest data bytes"),
             bytes_length: 35,
+            block_sizes: vec![Size(35)],
         };
 
-        assert!(shorter.encoded_blocks_bytes.len() < longer.encoded_blocks_bytes.len());
-        assert!(longer.encoded_blocks_bytes.len() < longest.encoded_blocks_bytes.len());
+        assert!(shorter.raw_bytes.len() < longer.raw_bytes.len());
+        assert!(longer.raw_bytes.len() < longest.raw_bytes.len());
 
         assert_eq!(longest.size(), 35);
         assert_eq!(longest.available_space(), SUPERBLOCK_MAX_SIZE - 35);
@@ -443,10 +451,10 @@ mod tests {
 
         shorter ^= longer.clone();
         assert_ne!(shorter, original_shorter);
-        assert!(shorter.encoded_blocks_bytes.len() > original_shorter.encoded_blocks_bytes.len());
+        assert!(shorter.raw_bytes.len() > original_shorter.raw_bytes.len());
         assert_eq!(
-            shorter.encoded_blocks_bytes[0..original_shorter.encoded_blocks_bytes.len()],
-            original_shorter.encoded_blocks_bytes
+            shorter.raw_bytes[0..original_shorter.raw_bytes.len()],
+            original_shorter.raw_bytes
         );
         shorter.crop_padding();
         assert_eq!(shorter, original_shorter);
@@ -457,8 +465,8 @@ mod tests {
         let mut sb1 = SuperBlock::new(123);
         let block_data1 = vec![222_u8; 423];
         while sb1.available_space() > block_data1.len() {
-            let block = EncodableBlock {
-                data: block_data1.clone(),
+            let block = RawBlock {
+                raw_bytes: block_data1.clone(),
             };
             sb1.add(block).unwrap();
         }
@@ -471,18 +479,15 @@ mod tests {
             "incorrectly decoded superblock from consensus bytes"
         );
 
-        let block_count = sb1.block_count();
-        let encoded_blocks1: EncodedBlocks =
-            encoding::decode_from_slice(sb1.clone().into_consensus_bytes().as_ref()).unwrap();
-        assert_eq!(encoded_blocks1.len(), block_count);
+        assert_eq!(sb1.block_count(), sb1.block_sizes.len());
 
         ////////////////////////////////
 
         let mut sb2 = SuperBlock::new(223);
         let block_data2 = vec![123_u8; 350];
         while sb2.available_space() > block_data2.len() {
-            let block = EncodableBlock {
-                data: block_data2.clone(),
+            let block = RawBlock {
+                raw_bytes: block_data2.clone(),
             };
             sb2.add(block).unwrap();
         }
@@ -495,18 +500,13 @@ mod tests {
             "incorrectly decoded superblock from consensus bytes"
         );
 
-        let block_count = sb2.block_count();
-        let encoded_blocks: EncodedBlocks =
-            encoding::decode_from_slice(sb2.clone().into_consensus_bytes().as_ref()).unwrap();
-        assert_eq!(encoded_blocks.len(), block_count);
-
         ////////////////////////////////
 
         let mut sb3 = SuperBlock::new(323);
         let block_data3 = vec![65_u8; 136588];
         while sb3.available_space() > block_data3.len() {
-            let block = EncodableBlock {
-                data: block_data3.clone(),
+            let block = RawBlock {
+                raw_bytes: block_data3.clone(),
             };
             sb3.add(block).unwrap();
         }
@@ -518,11 +518,6 @@ mod tests {
             sb3 == back_from_bytes,
             "incorrectly decoded superblock from consensus bytes"
         );
-
-        let block_count = sb3.block_count();
-        let encoded_blocks: EncodedBlocks =
-            encoding::decode_from_slice(sb3.clone().into_consensus_bytes().as_ref()).unwrap();
-        assert_eq!(encoded_blocks.len(), block_count);
 
         ////////////////////////////////
 
@@ -547,46 +542,48 @@ mod tests {
 
         xored = back_from_bytes;
 
-        let mut decoded = xored.clone();
+        let mut decoded = xored;
         decoded ^= sb3;
         decoded ^= sb2;
 
-        let block_count = decoded.block_count();
-        let encoded_blocks: EncodedBlocks =
-            encoding::decode_from_slice(decoded.clone().into_consensus_bytes().as_ref()).unwrap();
+        assert!(decoded.block_sizes.len() > sb1.block_sizes.len());
 
-        let decoded_blocks = encoded_blocks.into_vec();
-
-        assert_eq!(decoded_blocks.len(), block_count);
-        assert!(
-            encoded_blocks1.into_vec() == decoded_blocks,
-            "incorrectly decoded blocks"
-        );
-
-        assert_eq!(decoded_blocks.first().unwrap().data, block_data1);
-
-        assert!(decoded.size() > sb1.size());
-        decoded.crop_padding();
         assert!(decoded.size() == sb1.size());
 
-        assert!(decoded == sb1, "incorrectly decoded superblock")
+        // we need to crop padding, to have the same block_sizes vector!
+        decoded.crop_padding();
+
+        assert!(decoded.block_sizes == sb1.block_sizes);
+        assert!(decoded.block_count() == sb1.block_count());
+
+        assert!(decoded == sb1, "incorrectly decoded superblock");
+
+        let block_count = decoded.block_count();
+        let decoded_blocks = decoded.into_blocks().unwrap();
+        assert_eq!(decoded_blocks.len(), block_count);
+        assert_eq!(decoded_blocks.first().unwrap().raw_bytes, block_data1);
     }
 
     #[test]
     fn test_superblock_max_size() {
         let mut sb = SuperBlock::new(44444);
-        // Compact-size of 1_000_000 takes 5 bytes
-        let block_data = vec![213_u8; 1_000_000 - 5];
+        let block_data = vec![213_u8; 1_000_000];
 
-        while sb.available_space() > block_data.len() {
-            let block = EncodableBlock {
-                data: block_data.clone(),
+        while sb.available_space() >= block_data.len() {
+            let block = RawBlock {
+                raw_bytes: block_data.clone(),
             };
             sb.add(block).unwrap();
         }
 
         assert_eq!(sb.block_count(), 4);
         assert_eq!(sb.size(), SUPERBLOCK_MAX_SIZE);
+
+        // cannot add more
+        let r = sb.add(RawBlock {
+            raw_bytes: "whatever".bytes().collect(),
+        });
+        assert!(r.is_err());
 
         let consensus_bytes = sb.clone().encode_to_bytes();
         let decoded_from_bytes = SuperBlock::decode_from_bytes(&consensus_bytes).unwrap();
@@ -596,11 +593,9 @@ mod tests {
             "incorrectly decoded superblock from consensus bytes"
         );
 
-        let encoded_blocks: EncodedBlocks =
-            encoding::decode_from_slice(decoded_from_bytes.into_consensus_bytes().as_ref())
-                .unwrap();
-
-        assert_eq!(encoded_blocks.len(), sb.block_count());
-        assert_eq!(encoded_blocks.0[0].size(), block_data.len());
+        assert_eq!(
+            decoded_from_bytes.into_blocks().unwrap()[0].size(),
+            block_data.len()
+        );
     }
 }

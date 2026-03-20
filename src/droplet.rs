@@ -8,39 +8,44 @@ use encoding::{
 
 use crate::super_block::{SuperBlock, SuperBlockDecoder, SuperBlockEncoder};
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Droplet {
     /// Droplet number
     pub num: usize,
     /// Indices (numbers) of superblocks encoded in this droplet
     neighbors: Vec<Neighbor>,
-    /// Super block
-    superblock: SuperBlock,
+    /// Super block encoded (XORed) into this droplet
+    xored_superblock: SuperBlock,
 }
 
 impl Droplet {
+    /// Creates new droplet containing given superblock (possibly XORed) with some `neighbors`
     pub fn new(num: usize, neighbors: Vec<Neighbor>, superblock: SuperBlock) -> Self {
         Self {
             num,
             neighbors,
-            superblock,
+            xored_superblock: superblock,
         }
     }
 
+    /// Returns `neighbors` XORed into the droplet
     pub fn neighbors(&self) -> Vec<Neighbor> {
         self.neighbors.clone()
     }
 
-    pub fn superblock(&self) -> &SuperBlock {
-        &self.superblock
+    /// Returns reference to data encoded (XORed) in the droplet
+    pub fn xored_superblock(&self) -> &SuperBlock {
+        &self.xored_superblock
     }
 
-    pub fn into_superblock(self) -> SuperBlock {
-        self.superblock
+    /// Consumes self and returns data encoded (XORed) in the droplet
+    pub fn into_xored_superblock(self) -> SuperBlock {
+        self.xored_superblock
     }
 
+    /// Returns the size of the encoded data
     pub fn data_size(&self) -> usize {
-        self.superblock.size()
+        self.xored_superblock.size()
     }
 }
 
@@ -144,7 +149,11 @@ impl Encodable for Droplet {
             SliceEncoder::without_length_prefix(self.neighbors.as_ref()),
         );
 
-        DropletEncoder::new(Encoder3::new(num, neighbors, self.superblock.encoder()))
+        DropletEncoder::new(Encoder3::new(
+            num,
+            neighbors,
+            self.xored_superblock.encoder(),
+        ))
     }
 }
 
@@ -174,23 +183,58 @@ impl Decoder for DropletDecoder {
     fn push_bytes(&mut self, bytes: &mut &[u8]) -> std::result::Result<bool, Self::Error> {
         self.0
             .push_bytes(bytes)
-            .map_err(|e| anyhow!("DropletDecoder: push bytes: {}", e))
+            .map_err(|e| anyhow!("DropletDecoder: push bytes: {:?}", e))
     }
 
     fn end(self) -> std::result::Result<Self::Output, Self::Error> {
         let (num, neighbors, superblock) = self
             .0
             .end()
-            .map_err(|e| anyhow!("DropletDecoder: end: {}", e))?;
+            .map_err(|e| anyhow!("DropletDecoder: end: {:?}", e))?;
 
         Ok(Droplet {
             num,
             neighbors,
-            superblock,
+            xored_superblock: superblock,
         })
     }
 
     fn read_limit(&self) -> usize {
         self.0.read_limit()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::super_block::RawBlock;
+
+    use super::*;
+
+    #[test]
+    fn test_droplet() {
+        let block1 = Vec::from(b"Some block data");
+        let block2 = Vec::from(b"Another block");
+        let block3 = Vec::from(b"Last and longest block");
+        let b1 = RawBlock::new(&block1);
+        let b2 = RawBlock::new(&block2);
+        let b3 = RawBlock::new(&block3);
+
+        let mut sb = SuperBlock::new(50);
+        sb.add(b1).unwrap();
+        sb.add(b2).unwrap();
+        sb.add(b3).unwrap();
+
+        let neighbors = vec![Neighbor(3), Neighbor(19854)];
+        let droplet = Droplet::new(231, neighbors, sb);
+
+        let encoded_bytes = encoding::encode_to_vec(&droplet);
+        let decoded: Droplet = encoding::decode_from_slice(&encoded_bytes).unwrap();
+
+        assert_eq!(&decoded, &droplet);
+
+        let expected_blocks = droplet.into_xored_superblock().into_blocks().unwrap();
+        let decoded_blocks = decoded.into_xored_superblock().into_blocks().unwrap();
+
+        assert_eq!(decoded_blocks, expected_blocks);
     }
 }

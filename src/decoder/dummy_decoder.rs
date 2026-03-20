@@ -47,7 +47,7 @@ impl DummyDecoder {
             let superblock_num = droplet.neighbors()[0].into();
 
             self.recovered_super_blocks
-                .insert(superblock_num, droplet.into_superblock());
+                .insert(superblock_num, droplet.into_xored_superblock());
         }
 
         Ok(())

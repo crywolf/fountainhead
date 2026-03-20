@@ -47,22 +47,6 @@ where
         S: Storage<usize, SuperBlock>,
         S::Error: std::fmt::Debug,
     {
-        // TODO - dbg
-        for i in 0..superblock_storage.count() {
-            let superblock = superblock_storage
-                .get(&i)
-                .expect("Failed to get superblock {} from storage");
-            let superblock = superblock.expect("Not found");
-            println!(
-                "sblk: {}, blkcount: {}, size: {}, blen: {}, {:?}",
-                superblock.num,
-                superblock.block_count(),
-                superblock.size(),
-                superblock.bytes_length,
-                &superblock.encoded_blocks_bytes[0..18],
-            );
-        }
-
         _ = self.super_blocks.take(); // drop storage if present
 
         self.epoch = epoch;
@@ -108,15 +92,6 @@ where
 
             encoded_superblock ^= superblock; // XORed_superblock is zero-padded to the biggest of the selected superblocks (neighbor)
         }
-
-        // println!(
-        //     "drp: {}, sblk: {},  neighbors:{:?}, blkcount: {}, size:{}",
-        //     self.droplet_counter,
-        //     encoded_superblock.num,
-        //     neighbors,
-        //     encoded_superblock.block_count(),
-        //     encoded_superblock.size(),
-        // );
 
         // create droplet with the encoded superblock
         let droplet = Droplet::new(self.droplet_counter, neighbors, encoded_superblock);
