@@ -16,8 +16,8 @@ pub const SUPERBLOCK_MAX_SIZE: usize = 4_000_000;
 /// SuperBlock represents concatenated blocks (with padding)
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuperBlock {
-    /// Superblock number // TODO remove - unnecessary
-    pub num: usize,
+    /// Superblock number
+    num: usize,
     /// Number of blocks included in this superblock
     block_count: usize,
     /// Length of encoded bytes
@@ -25,7 +25,7 @@ pub struct SuperBlock {
     /// Sizes of individual blocks
     block_sizes: Vec<Size>,
     /// Concatenated consensus-encoded blocks (raw block bytes)
-    pub raw_bytes: Vec<u8>, // TODO pub
+    raw_bytes: Vec<u8>,
 }
 
 impl SuperBlock {

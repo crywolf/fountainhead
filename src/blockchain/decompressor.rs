@@ -50,14 +50,13 @@ impl Decompressor {
 
         let epochs_count = FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default();
 
-        log::info!("Starting restoration of {} epochs", epochs_count,);
+        println!("Starting restoration of {} epochs", epochs_count,);
 
         // Iterate over all epochs
         for epoch in 0..epochs_count {
-            log::info!("Reconstructed chain height: {}", out_chain.height());
-            log::info!("Restoring epoch #{epoch}");
+            println!("Reconstructed chain height: {}", out_chain.height());
+            println!("Restoring epoch #{epoch}");
 
-            //let mut decoder = crate::decoder::dummy_decoder::DummyDecoder::new(); // TODO
             let mut decoder = FountainDecoder::new()?;
 
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
@@ -66,11 +65,11 @@ impl Decompressor {
             let number_of_droplets = droplet_storage.count();
             let number_of_super_blocks = self.config.super_blocks_per_epoch;
 
-            log::info!(
+            println!(
                 "Decoding {number_of_super_blocks} superblocks from available {number_of_droplets} droplets for epoch #{epoch}"
             );
 
-            let mut added_droplets_count = 0;
+            let mut added_droplets_count: usize = 0;
 
             // Iterate over all available droplets in epoch
             // We need blocks decoded in order, so we iterate from 0 to number of superblocks
@@ -84,18 +83,11 @@ impl Decompressor {
                         .get_decoded_superblock(superblock_num)
                         .context("get_decoded_superblock")?
                     {
-                        // Next necessary block was decoded,
+                        // Next wanted superblock was decoded,
                         // insert all its blocks into the blockchain
 
                         let num = superblock_num;
-                        // log::info!("- - - Blockchain: Adding superblock {num}");
-                        // log::info!(
-                        //     "DECODED sblk: {}, blkcount: {}, size: {}, {:?}",
-                        //     decoded_superblock.num,
-                        //     decoded_superblock.block_count(),
-                        //     decoded_superblock.size(),
-                        //     &decoded_superblock.encoded_blocks_bytes[0..18],
-                        // );
+                        log::debug!("- - - Blockchain: Adding superblock {num}");
 
                         let blocks = decoded_superblock
                             .into_blocks()
@@ -109,7 +101,7 @@ impl Decompressor {
                             }
                         }
                         let blocks = blocks?;
-                        //log::info!("sblk: {}, blkcount: {}", num, blocks.len());
+                        log::debug!("sblk: {}, blkcount: {}", num, blocks.len());
 
                         for (i, block) in blocks.into_iter().enumerate() {
                             match self.output_chainman.inner.process_block(&block.to_block()?) {
@@ -135,8 +127,11 @@ impl Decompressor {
                         break;
                     } else {
                         // Add another droplet to the decoder
+                        log::debug!("Add droplet to decoder: {}", added_droplets_count);
+                        if added_droplets_count.is_multiple_of(100) {
+                            print_progress();
+                        }
 
-                        //log::info!("Add droplet to decoder: {}", added_droplets_count);
                         if added_droplets_count < number_of_droplets {
                             let droplet =
                                 droplet_storage
@@ -149,7 +144,6 @@ impl Decompressor {
                                 anyhow::anyhow!("droplet {} not found", added_droplets_count)
                             })?;
 
-                            //log::warn!("xored sblk size: {}", droplet.superblock().size());
                             decoder
                                 .add_encoded_droplet(droplet)
                                 .context("add droplet to decoder")?;
@@ -179,11 +173,11 @@ impl Decompressor {
         }
 
         ///////////////////////
-        log::info!("All blocks from droplets were successfully restored");
+        println!("All blocks from droplets were successfully restored");
 
         let out_chain = self.output_chainman.inner.active_chain();
 
-        log::info!("Reconstructed chain height: {}", out_chain.height());
+        println!("Reconstructed chain height: {}", out_chain.height());
 
         Ok(())
     }

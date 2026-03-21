@@ -24,6 +24,9 @@ pub struct Config {
 
     /// Number of epochs to encode, 0 means encode the whole blockchain
     pub epochs_to_encode: usize,
+
+    /// Compression ratio. For example 10 means 1:10 blockchain disk space savings.
+    pub compression_ratio: usize,
 }
 
 pub struct Compressor {
@@ -64,7 +67,7 @@ impl Compressor {
 
         let chain = self.input_chainman.inner.active_chain();
         let chain_height = chain.height() as usize;
-        log::info!("Input chain height: {}", chain_height);
+        println!("Input chain height: {}", chain_height);
 
         let epochs_to_encode = if self.config.epochs_to_encode == 0 {
             usize::MAX
@@ -112,28 +115,37 @@ impl Compressor {
             processed_blocks_height = total_processed_blocks;
             previous_total_processed_blocks = total_processed_blocks;
 
-            log::info!(
+            println!(
                 "Resuming compression of epoch #{epoch} (last compressed block: {})",
                 already_compressed_blocks
             );
         } else {
             // Starting from scratch
             if self.config.epochs_to_encode == 0 {
-                log::info!(
+                println!(
                     "Starting compression of the whole blockchain with {} blocks",
                     chain_height
                 );
             } else {
-                log::info!(
+                println!(
                     "Starting compression of {} epochs, total {} superblocks",
                     self.config.epochs_to_encode,
-                    self.config.epochs_to_encode * self.config.super_blocks_per_epoch
+                    self.config.epochs_to_encode
+                        * self
+                            .config
+                            .super_blocks_per_epoch
+                            .div_ceil(self.config.compression_ratio),
                 );
             };
         }
 
         // Start compression
-        log::info!(
+        println!(
+            "Compressing epoch #{epoch}, processed block height: {}",
+            already_compressed_blocks
+        );
+
+        println!(
             "Constructing superblocks for epoch #{epoch}, starting at block height: {}",
             already_compressed_blocks
         );
@@ -144,7 +156,7 @@ impl Compressor {
         let mut superblock = SuperBlock::new(super_blocks_count);
         let mut epoch_finished = false;
 
-        // iterating over all blocks
+        // Iterating over all blocks
         for (height, entry) in chain.iter().enumerate().skip(already_compressed_blocks) {
             let block = self
                 .input_chainman
@@ -203,7 +215,7 @@ impl Compressor {
                 epoch_processed_blocks = total_processed_blocks - previous_total_processed_blocks;
                 previous_total_processed_blocks = total_processed_blocks;
 
-                // last superblock in epoch, add superblock to collection of superblocks
+                // Last superblock in epoch, add superblock to collection of superblocks
                 log::debug!(
                     "== last superblock in epoch {} => closing current superblock, block {}, total {} superblocks",
                     epoch,
@@ -225,15 +237,15 @@ impl Compressor {
                 encoder.init_epoch(epoch, superblock_storage, droplet_storage.count());
                 let mut rng = rand::rng();
 
-                log::info!(
-                    "Generating droplets for epoch #{} with {} superblocks containing {} blocks",
-                    epoch,
-                    super_blocks_count,
-                    epoch_processed_blocks,
+                // Number of droplets according to compression ratio
+                let produced_droplets = super_blocks_count.div_ceil(self.config.compression_ratio);
+
+                println!(
+                    "Generating {} droplets for epoch #{} (which consists of {} superblocks, containing {} blocks)",
+                    produced_droplets, epoch, super_blocks_count, epoch_processed_blocks,
                 );
 
-                // TODO produce correct number of droplets according to compress ratio
-                for num in 0..super_blocks_count {
+                for num in 0..produced_droplets {
                     let droplet = encoder
                         .generate_droplet(&mut rng)
                         .with_context(|| format!("generate droplet {}", num))?;
@@ -265,7 +277,7 @@ impl Compressor {
                 processed_blocks_height = height;
 
                 if epoch == epochs_to_encode - 1 {
-                    log::info!("Last requested epoch #{} reached, finishing", epoch);
+                    println!("Last requested epoch #{} reached, finishing", epoch);
                     break;
                 } else {
                     // Store last compressed epoch and block to enable resuming interrupted compression
@@ -282,9 +294,13 @@ impl Compressor {
 
                 // Start new epoch
                 epoch += 1;
-                log::info!(
+                println!(
                     "Compressing epoch #{epoch}, processed block height: {}",
                     height
+                );
+                println!(
+                    "Constructing superblocks for epoch #{epoch}, starting at block height: {}",
+                    already_compressed_blocks
                 );
 
                 super_blocks_count = 0;
@@ -298,7 +314,7 @@ impl Compressor {
 
             if height == chain_height {
                 println!();
-                log::info!(
+                println!(
                     "Incomplete epoch #{} of {} blocks remains uncompressed, finishing",
                     epoch,
                     total_processed_blocks - processed_blocks_height
@@ -307,11 +323,11 @@ impl Compressor {
             }
         }
 
-        log::info!(
+        println!(
             "All droplets in {} epochs were successfully created",
             epoch + 1
         );
-        log::info!(
+        println!(
             "Number of compressed blocks (block height): {}",
             processed_blocks_height
         );

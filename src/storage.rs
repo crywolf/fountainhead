@@ -13,6 +13,6 @@ pub trait Storage<K, V> {
     /// Returns the number of items in the storage
     fn count(&self) -> usize;
 
-    /// Returns the maximum size of the stored items
+    /// Returns the biggest size of the stored items
     fn max_size(&self) -> usize;
 }

@@ -38,14 +38,21 @@ fn main() -> Result<()> {
     // let epochs_to_encode = 3; // 0 means the whole blockchain
     // let super_blocks_per_epoch = 200; // TODO
 
-    let epochs_to_encode = 2; // 0 means the whole blockchain
-    let super_blocks_per_epoch = 600; // TODO
+    let epochs_to_encode = 3; // 0 means the whole blockchain
+    let super_blocks_per_epoch = 1000; // TODO
+    let compression_ratio = 10; // TODO
+
+    if compression_ratio < 1 {
+        eprintln!("Compression ratio must be higher than 0");
+        process::exit(1);
+    }
 
     let compressor_config = compressor::Config {
         droplets_dir: droplets_dir.clone(),
         source_data_dir,
         super_blocks_per_epoch,
         epochs_to_encode,
+        compression_ratio,
     };
 
     let decompressor_config = decompressor::Config {
@@ -58,21 +65,31 @@ fn main() -> Result<()> {
     let degree_distribution =
         RobustSoliton::new(compressor_config.super_blocks_per_epoch, 0.06, 0.01);
 
+    let min_required_droplets_in_epoch = degree_distribution.min_encoded_symbols();
     println!(
-        "Number of necessary droplets to restore blockchain compressed using {} superblocks in epoch, is {}",
-        compressor_config.super_blocks_per_epoch,
-        degree_distribution.min_encoded_symbols()
+        "Number of necessary droplets in each epoch to restore blockchain (compressed using {} superblocks per epoch), is {}",
+        compressor_config.super_blocks_per_epoch, min_required_droplets_in_epoch,
     );
 
-    //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
-    let encoder = FountainEncoder::new(degree_distribution);
-
     if command == "compress" {
+        // COMPRESS
+        let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(compression_ratio);
+        let repetitions_needed =
+            min_required_droplets_in_epoch.div_ceil(droplets_produced_in_epoch);
+
+        //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
+        let encoder = FountainEncoder::new(degree_distribution);
         let mut compressor =
             Compressor::new(compressor_config, encoder).context("create compressor")?;
 
-        compressor.compress()?;
+        // Repeat compression until enough droplets for successful blockchain restoration is created
+        for i in 0..repetitions_needed {
+            println!("-----------------------------------------------------");
+            println!("Round {} of {} needed", i + 1, repetitions_needed);
+            compressor.compress()?;
+        }
     } else if command == "restore" {
+        // RESTORE
         let decompressor = Decompressor::new(decompressor_config).context("create compressor")?;
 
         decompressor.restore()?;
