@@ -25,8 +25,8 @@ pub struct Config {
     /// Number of epochs to encode, 0 means encode the whole blockchain
     pub epochs_to_encode: usize,
 
-    /// Compression ratio. For example 10 means 1:10 blockchain disk space savings.
-    pub compression_ratio: usize,
+    /// Storage reduction ratio. For example 10 means 1:10 blockchain disk space savings.
+    pub storage_reduction_ratio: usize,
 }
 
 pub struct Compressor {
@@ -134,7 +134,7 @@ impl Compressor {
                         * self
                             .config
                             .super_blocks_per_epoch
-                            .div_ceil(self.config.compression_ratio),
+                            .div_ceil(self.config.storage_reduction_ratio),
                 );
             };
         }
@@ -238,7 +238,8 @@ impl Compressor {
                 let mut rng = rand::rng();
 
                 // Number of droplets according to compression ratio
-                let produced_droplets = super_blocks_count.div_ceil(self.config.compression_ratio);
+                let produced_droplets =
+                    super_blocks_count.div_ceil(self.config.storage_reduction_ratio);
 
                 println!(
                     "Generating {} droplets for epoch #{} (which consists of {} superblocks, containing {} blocks)",

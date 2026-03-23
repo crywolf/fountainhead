@@ -38,11 +38,11 @@ fn main() -> Result<()> {
     // let epochs_to_encode = 3; // 0 means the whole blockchain
     // let super_blocks_per_epoch = 200; // TODO
 
-    let epochs_to_encode = 3; // 0 means the whole blockchain
+    let epochs_to_encode = 0; // 0 means the whole blockchain
     let super_blocks_per_epoch = 1000; // TODO
-    let compression_ratio = 10; // TODO
+    let storage_reduction_ratio = 10; // TODO
 
-    if compression_ratio < 1 {
+    if storage_reduction_ratio < 1 {
         eprintln!("Compression ratio must be higher than 0");
         process::exit(1);
     }
@@ -52,7 +52,7 @@ fn main() -> Result<()> {
         source_data_dir,
         super_blocks_per_epoch,
         epochs_to_encode,
-        compression_ratio,
+        storage_reduction_ratio,
     };
 
     let decompressor_config = decompressor::Config {
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
 
     if command == "compress" {
         // COMPRESS
-        let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(compression_ratio);
+        let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(storage_reduction_ratio);
         let repetitions_needed =
             min_required_droplets_in_epoch.div_ceil(droplets_produced_in_epoch);
 
