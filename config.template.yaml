@@ -1,0 +1,6 @@
+source_data_dir: /source_signet
+output_data_dir: /dest_signet
+droplets_dir: /droplets
+epochs_to_encode: 0 # 0 means the whole blockchain
+super_blocks_per_epoch: 1000
+storage_reduction_ratio: 10

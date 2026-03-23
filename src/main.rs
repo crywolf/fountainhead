@@ -17,24 +17,18 @@ fn main() -> Result<()> {
     setup_logging();
 
     let args = Args::parse().unwrap_or_else(|err| {
-        eprintln!("Error: {}", err);
+        eprintln!("Error: {:?}", err);
         process::exit(1);
     });
 
-    let epochs_to_encode = 0; // 0 means the whole blockchain
-    let super_blocks_per_epoch = 1000; // TODO
-    let storage_reduction_ratio = 10; // TODO
-
-    if storage_reduction_ratio < 1 {
-        eprintln!("Compression ratio must be higher than 0");
-        process::exit(1);
-    }
+    let super_blocks_per_epoch = args.super_blocks_per_epoch;
+    let storage_reduction_ratio = args.storage_reduction_ratio;
 
     let compressor_config = compressor::Config {
         droplets_dir: args.droplets_dir.clone(),
         source_data_dir: args.source_data_dir,
         super_blocks_per_epoch,
-        epochs_to_encode,
+        epochs_to_encode: args.epochs_to_encode,
         storage_reduction_ratio,
     };
 
