@@ -49,6 +49,9 @@ impl Decompressor {
         let out_chain = self.output_chainman.inner.active_chain();
 
         let epochs_count = FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default();
+        if epochs_count == 0 {
+            anyhow::bail!("No encoded epochs were found in the storage");
+        }
 
         println!("Starting restoration of {} epochs", epochs_count,);
 
