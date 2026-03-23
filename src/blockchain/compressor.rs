@@ -61,7 +61,7 @@ impl Compressor {
         })
     }
 
-    pub fn compress(&mut self) -> Result<()> {
+    pub fn generate_droplets(&mut self) -> Result<()> {
         const EPOCHS_COUNT_FILE: &str = "epochs_count.dat";
         const LAST_COMPRESSED_BLOCK_FILE: &str = "last_compressed_block.dat";
 

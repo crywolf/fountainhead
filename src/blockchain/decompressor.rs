@@ -45,7 +45,7 @@ impl Decompressor {
         })
     }
 
-    pub fn restore(&self) -> Result<()> {
+    pub fn restore_blockchain(&self) -> Result<()> {
         let out_chain = self.output_chainman.inner.active_chain();
 
         let epochs_count = FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default();
@@ -154,7 +154,7 @@ impl Decompressor {
                             log::error!(
                                 "Used all {added_droplets_count} droplets. No more droplet files left, need more droplets!"
                             );
-                            bail!("No more droplet files left, need more droplets!");
+                            bail!("Not enough droplets. Obtain or generate more droplets!");
                         }
                     }
                 }

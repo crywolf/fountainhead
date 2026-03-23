@@ -1,4 +1,5 @@
 pub mod blockchain;
+pub mod cli;
 pub mod decoder;
 mod droplet;
 pub mod encoder;

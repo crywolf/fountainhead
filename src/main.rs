@@ -1,4 +1,4 @@
-use std::{env, process};
+use std::process;
 
 use anyhow::{Context, Result};
 use fountainhead::{
@@ -6,6 +6,7 @@ use fountainhead::{
         compressor::{self, Compressor},
         decompressor::{self, Decompressor},
     },
+    cli::{Args, Command},
     encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
 };
 
@@ -15,28 +16,10 @@ const WORKER_THREADS: i32 = 8;
 fn main() -> Result<()> {
     setup_logging();
 
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 5 {
-        eprintln!(
-            "Usage: {} <COMMAND> <path_to_input_dir> <path_to_output_dir> <path_to_droplets_dir>",
-            args[0]
-        );
+    let args = Args::parse().unwrap_or_else(|err| {
+        eprintln!("Error: {}", err);
         process::exit(1);
-    }
-
-    let command = args[1].clone();
-    if !["compress", "restore"].contains(&command.as_str()) {
-        eprintln!("Unknown command {}", command);
-        process::exit(1);
-    }
-
-    let source_data_dir = args[2].clone();
-    let output_data_dir = args[3].clone();
-    let droplets_dir = args[4].clone();
-
-    // let epochs_to_encode = 3; // 0 means the whole blockchain
-    // let super_blocks_per_epoch = 200; // TODO
+    });
 
     let epochs_to_encode = 0; // 0 means the whole blockchain
     let super_blocks_per_epoch = 1000; // TODO
@@ -48,17 +31,17 @@ fn main() -> Result<()> {
     }
 
     let compressor_config = compressor::Config {
-        droplets_dir: droplets_dir.clone(),
-        source_data_dir,
+        droplets_dir: args.droplets_dir.clone(),
+        source_data_dir: args.source_data_dir,
         super_blocks_per_epoch,
         epochs_to_encode,
         storage_reduction_ratio,
     };
 
     let decompressor_config = decompressor::Config {
-        droplets_dir,
+        droplets_dir: args.droplets_dir,
         super_blocks_per_epoch,
-        output_data_dir,
+        output_data_dir: args.output_data_dir,
         worker_threads: WORKER_THREADS,
     };
 
@@ -71,28 +54,34 @@ fn main() -> Result<()> {
         compressor_config.super_blocks_per_epoch, min_required_droplets_in_epoch,
     );
 
-    if command == "compress" {
-        // COMPRESS
-        let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(storage_reduction_ratio);
-        let repetitions_needed =
-            min_required_droplets_in_epoch.div_ceil(droplets_produced_in_epoch);
+    let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(storage_reduction_ratio);
+    let repetitions_needed = min_required_droplets_in_epoch.div_ceil(droplets_produced_in_epoch);
 
-        //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
-        let encoder = FountainEncoder::new(degree_distribution);
-        let mut compressor =
-            Compressor::new(compressor_config, encoder).context("create compressor")?;
+    //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
+    let encoder = FountainEncoder::new(degree_distribution);
+    let mut compressor =
+        Compressor::new(compressor_config, encoder).context("create compressor")?;
 
-        // Repeat compression until enough droplets for successful blockchain restoration is created
-        for i in 0..repetitions_needed {
-            println!("-----------------------------------------------------");
-            println!("Round {} of {} needed", i + 1, repetitions_needed);
-            compressor.compress()?;
+    match args.command {
+        Command::Generate => {
+            // Run droplet generation just once
+            compressor.generate_droplets()?;
         }
-    } else if command == "restore" {
-        // RESTORE
-        let decompressor = Decompressor::new(decompressor_config).context("create compressor")?;
+        Command::GenerateAll => {
+            // Repeat droplet generation until enough droplets for successful blockchain restoration is created
+            for i in 0..repetitions_needed {
+                println!("-----------------------------------------------------");
+                println!("Round {} of {} needed", i + 1, repetitions_needed);
+                compressor.generate_droplets()?;
+            }
+        }
+        Command::Restore => {
+            // RESTORE
+            let decompressor =
+                Decompressor::new(decompressor_config).context("create compressor")?;
 
-        decompressor.restore()?;
+            decompressor.restore_blockchain()?;
+        }
     }
 
     Ok(())
