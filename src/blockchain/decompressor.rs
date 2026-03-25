@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{ChainType, ChainstateManagerBuilder, ContextBuilder, ProcessBlockResult};
 
 use crate::{
-    blockchain::{OutputChainstateManager, print_progress},
+    blockchain::{OutputChainstateManager, headerchain::HeaderChain, print_progress},
     decoder::fountain_decoder::FountainDecoder,
     storage::{Storage, file_storage::FileStorage},
 };
@@ -10,6 +10,9 @@ use crate::{
 pub struct Config {
     /// Droplets directory
     pub droplets_dir: String,
+
+    /// Header-chain directory
+    pub header_chain_dir: String,
 
     /// How many super blocks is one epoch encoded into
     pub super_blocks_per_epoch: usize,
@@ -24,6 +27,7 @@ pub struct Config {
 pub struct Decompressor {
     config: Config,
     output_chainman: OutputChainstateManager,
+    header_chain: HeaderChain,
 }
 
 impl Decompressor {
@@ -39,9 +43,14 @@ impl Decompressor {
                 .build()?,
         );
 
+        let header_chain = HeaderChain::new(crate::blockchain::headerchain::Config {
+            header_chain_dir: config.header_chain_dir.clone(),
+        })?;
+
         Ok(Self {
             config,
             output_chainman,
+            header_chain,
         })
     }
 
@@ -60,7 +69,7 @@ impl Decompressor {
             println!("Reconstructed chain height: {}", out_chain.height());
             println!("Restoring epoch #{epoch}");
 
-            let mut decoder = FountainDecoder::new()?;
+            let mut decoder = FountainDecoder::new(&self.header_chain)?;
 
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                 .with_context(|| format!("open droplet storage for epoch {}", epoch))?;

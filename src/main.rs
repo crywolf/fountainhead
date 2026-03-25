@@ -5,6 +5,7 @@ use fountainhead::{
     blockchain::{
         compressor::{self, Compressor},
         decompressor::{self, Decompressor},
+        headerchain::{self, HeaderChain},
     },
     cli::{Args, Command},
     encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
@@ -26,14 +27,19 @@ fn main() -> Result<()> {
 
     let compressor_config = compressor::Config {
         droplets_dir: args.droplets_dir.clone(),
-        source_data_dir: args.source_data_dir,
+        source_data_dir: args.source_data_dir.clone(),
         super_blocks_per_epoch,
         epochs_to_encode: args.epochs_to_encode,
         storage_reduction_ratio,
     };
 
+    let header_chain_config = headerchain::Config {
+        header_chain_dir: args.header_chain_dir.clone(),
+    };
+
     let decompressor_config = decompressor::Config {
         droplets_dir: args.droplets_dir,
+        header_chain_dir: args.header_chain_dir,
         super_blocks_per_epoch,
         output_data_dir: args.output_data_dir,
         worker_threads: WORKER_THREADS,
@@ -43,25 +49,35 @@ fn main() -> Result<()> {
         RobustSoliton::new(compressor_config.super_blocks_per_epoch, 0.06, 0.01);
 
     let min_required_droplets_in_epoch = degree_distribution.min_encoded_symbols();
-    println!(
-        "Number of necessary droplets in each epoch to restore blockchain (compressed using {} superblocks per epoch), is {}",
-        compressor_config.super_blocks_per_epoch, min_required_droplets_in_epoch,
-    );
 
     let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(storage_reduction_ratio);
     let repetitions_needed = min_required_droplets_in_epoch.div_ceil(droplets_produced_in_epoch);
 
     //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
     let encoder = FountainEncoder::new(degree_distribution);
-    let mut compressor =
-        Compressor::new(compressor_config, encoder).context("create compressor")?;
 
     match args.command {
         Command::Generate => {
+            let mut compressor =
+                Compressor::new(compressor_config, encoder).context("create compressor")?;
+
+            println!(
+                "Number of necessary droplets in each epoch to restore blockchain (compressed using {} superblocks per epoch), is {}",
+                super_blocks_per_epoch, min_required_droplets_in_epoch,
+            );
+
             // Run droplet generation just once
             compressor.generate_droplets()?;
         }
         Command::GenerateAll => {
+            let mut compressor =
+                Compressor::new(compressor_config, encoder).context("create compressor")?;
+
+            println!(
+                "Number of necessary droplets in each epoch to restore blockchain (compressed using {} superblocks per epoch), is {}",
+                super_blocks_per_epoch, min_required_droplets_in_epoch,
+            );
+
             // Repeat droplet generation until enough droplets for successful blockchain restoration is created
             for i in 0..repetitions_needed {
                 println!("-----------------------------------------------------");
@@ -69,8 +85,13 @@ fn main() -> Result<()> {
                 compressor.generate_droplets()?;
             }
         }
+        Command::HeaderChain => {
+            let mut header_chain =
+                HeaderChain::new(header_chain_config).context("create header chain producer")?;
+
+            header_chain.generate(&args.source_data_dir)?;
+        }
         Command::Restore => {
-            // RESTORE
             let decompressor =
                 Decompressor::new(decompressor_config).context("create compressor")?;
 

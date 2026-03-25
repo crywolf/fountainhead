@@ -3,6 +3,7 @@ use std::io::{Cursor, Read};
 use anyhow::{Context, Result};
 use bitcoin_consensus_encoding as encoding;
 use bitcoinkernel::Block;
+use bitcoinkernel::core::BlockHashExt;
 use encoding::CompactSizeDecoderError;
 
 use encoding::{
@@ -72,6 +73,26 @@ impl SuperBlock {
     /// Returns amount of bytes that can be added to the superblock (size of the superblock is limited by [`SUPERBLOCK_MAX_SIZE`])
     pub fn available_space(&self) -> usize {
         SUPERBLOCK_MAX_SIZE - self.raw_bytes.len()
+    }
+
+    // Returns block hashes of the contained blocks
+    pub fn block_hashes(&self) -> anyhow::Result<Vec<[u8; 32]>> {
+        let mut hashes = Vec::with_capacity(self.block_count());
+
+        let mut bytes = Cursor::new(&self.raw_bytes);
+
+        for size in self.block_sizes.iter() {
+            let mut raw_bytes = vec![0u8; size.into()];
+            bytes
+                .read_exact(&mut raw_bytes)
+                .context("read raw block bytes")?;
+
+            let block = RawBlock::new(&raw_bytes);
+
+            hashes.push(block.to_block()?.hash().to_bytes());
+        }
+
+        Ok(hashes)
     }
 
     /// Consumes self and returns a vector of blocks

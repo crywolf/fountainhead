@@ -109,7 +109,6 @@ impl Compressor {
             already_compressed_blocks = last_compressed_block
                 .parse::<usize>()
                 .context("parse last_compressed_block string")?;
-            //+ 1;
 
             total_processed_blocks = already_compressed_blocks;
             processed_blocks_height = total_processed_blocks;

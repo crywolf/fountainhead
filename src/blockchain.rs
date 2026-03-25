@@ -1,5 +1,6 @@
 pub mod compressor;
 pub mod decompressor;
+pub mod headerchain;
 
 use std::io::Write;
 
@@ -27,6 +28,16 @@ struct OutputChainstateManager {
 }
 
 impl From<ChainstateManager> for OutputChainstateManager {
+    fn from(value: ChainstateManager) -> Self {
+        Self { inner: value }
+    }
+}
+
+struct HeaderChainstateManager {
+    inner: ChainstateManager,
+}
+
+impl From<ChainstateManager> for HeaderChainstateManager {
     fn from(value: ChainstateManager) -> Self {
         Self { inner: value }
     }

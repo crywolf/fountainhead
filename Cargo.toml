@@ -2,6 +2,10 @@
 name = "fountainhead"
 version = "0.1.0"
 edition = "2024"
+description = "Fountain Coded Blocks for Useful Blockchain Pruning"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/crywolf/fountainhead"
 
 [dependencies]
 anyhow = "1.0.102"
@@ -11,6 +15,7 @@ clap = { version = "4.6.0", features = ["derive"] }
 env_logger = "0.11.9"
 log = "0.4.29"
 rand = "0.10.0"
+rusty-leveldb = "4.0.1"
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.27.0"
 yaml_serde = "0.10.4"

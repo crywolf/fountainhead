@@ -11,6 +11,7 @@ pub struct Args {
     pub source_data_dir: String,
     pub output_data_dir: String,
     pub droplets_dir: String,
+    pub header_chain_dir: String,
     pub epochs_to_encode: usize,
     pub super_blocks_per_epoch: usize,
     pub storage_reduction_ratio: usize,
@@ -37,6 +38,7 @@ impl Args {
             source_data_dir: config.source_data_dir,
             output_data_dir: config.output_data_dir,
             droplets_dir: config.droplets_dir,
+            header_chain_dir: config.header_chain_dir,
             epochs_to_encode: config.epochs_to_encode,
             super_blocks_per_epoch: config.super_blocks_per_epoch,
             storage_reduction_ratio: config.storage_reduction_ratio,
@@ -44,7 +46,6 @@ impl Args {
     }
 }
 
-/// Application arguments
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -60,11 +61,13 @@ struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     /// Generate droplets according to chosen `storage reduction ratio`
-    #[command(name = "gen")]
     Generate,
     /// Repeat droplet generation until enough droplets to successfully restore the blockchain is created
-    #[command(name = "gen-all")]
+    #[command(name = "generate-all")]
     GenerateAll,
+    /// Generate header-chain from input blockchain
+    #[command(name = "headerchain")]
+    HeaderChain,
     /// Attempts to restore the blockchain from droplets
     Restore,
 }
@@ -74,6 +77,7 @@ struct ConfigYaml {
     source_data_dir: String,
     output_data_dir: String,
     droplets_dir: String,
+    header_chain_dir: String,
     epochs_to_encode: usize,
     super_blocks_per_epoch: usize,
     storage_reduction_ratio: usize,
