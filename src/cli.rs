@@ -60,16 +60,18 @@ struct Cli {
 /// Application commands
 #[derive(Subcommand)]
 pub enum Command {
-    /// Generate droplets from the input blockchain according to chosen `storage reduction ratio`
+    /// Generates droplets from the input blockchain according to chosen `storage reduction ratio`
     Generate,
-    /// Repeat droplet generation until enough droplets to successfully restore the blockchain were created
+    /// Repeats droplet generation until enough droplets to successfully restore the blockchain were created
     #[command(name = "generate-all")]
     GenerateAll,
-    /// Generate header-chain from the input blockchain
+    /// Generates header-chain from the input blockchain
     #[command(name = "headerchain")]
     HeaderChain,
     /// Attempts to restore the blockchain from droplets
     Restore,
+    /// Removes all droplets
+    PurgeDroplets,
 }
 
 #[derive(Deserialize)]

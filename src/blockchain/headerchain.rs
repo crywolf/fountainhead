@@ -135,8 +135,10 @@ impl HeaderChain {
 
         match self.database.borrow_mut().get(&key) {
             Some(bytes) => {
-                // First 8 bytes contain some metadata => ignore them
-                let header = BlockHeader::new(&bytes[8..]).context("parse header from bytes")?;
+                // First X bytes contain some metadata => ignore them, last 80 bytes are the header bytes
+                let header = BlockHeader::new(&bytes[bytes.len() - 80..])
+                    .context("create header from bytes")
+                    .inspect_err(|e| log::error!("Error looking up block header: {}", e))?;
                 Ok(Some(header))
             }
             None => Ok(None),

@@ -81,15 +81,15 @@ impl<'a> FountainDecoder<'a> {
 
                 let block_hashes = match unknown_superblock
                     .block_hashes()
-                    .context("get block hashes from superblock")
+                    .context("Error getting block hashes from superblock")
                 {
                     Ok(hashes) => hashes,
-                    Err(_) => {
+                    Err(e) => {
                         // Do not return error here, but rather mark the droplet invalid
                         // store the droplet position for removal
                         invalid_droplets.push(position);
                         valid_super_block = false;
-                        log::warn!("Invalid droplet {}", droplet.num);
+                        log::warn!("Invalid droplet {}: {}", droplet.num, e);
                         vec![]
                     }
                 };

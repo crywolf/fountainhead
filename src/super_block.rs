@@ -76,7 +76,9 @@ impl SuperBlock {
     }
 
     // Returns block hashes of the contained blocks
-    pub fn block_hashes(&self) -> anyhow::Result<Vec<[u8; 32]>> {
+    pub fn block_hashes(&mut self) -> anyhow::Result<Vec<[u8; 32]>> {
+        self.crop_padding();
+
         let mut hashes = Vec::with_capacity(self.block_count());
 
         let mut bytes = Cursor::new(&self.raw_bytes);

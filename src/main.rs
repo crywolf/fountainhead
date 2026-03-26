@@ -9,6 +9,7 @@ use fountainhead::{
     },
     cli::{Args, Command},
     encoder::{distribution::RobustSoliton, fountain_encoder::FountainEncoder},
+    storage::file_storage::FileStorage,
 };
 
 /// Number of worker threads for block validation
@@ -38,7 +39,7 @@ fn main() -> Result<()> {
     };
 
     let decompressor_config = decompressor::Config {
-        droplets_dir: args.droplets_dir,
+        droplets_dir: args.droplets_dir.clone(),
         header_chain_dir: args.header_chain_dir,
         super_blocks_per_epoch,
         output_data_dir: args.output_data_dir,
@@ -96,6 +97,16 @@ fn main() -> Result<()> {
                 Decompressor::new(decompressor_config).context("create decompressor")?;
 
             decompressor.restore_blockchain()?;
+        }
+        Command::PurgeDroplets => {
+            for epoch in 0..args.epochs_to_encode {
+                let droplet_storage = FileStorage::new(&args.droplets_dir, epoch)
+                    .with_context(|| format!("open droplet storage for epoch {}", epoch))?;
+                droplet_storage
+                    .truncate()
+                    .with_context(|| format!("truncate droplet storage for epoch {}", epoch))?
+            }
+            println!("Droplets for {} epochs were purged", args.epochs_to_encode);
         }
     }
 
