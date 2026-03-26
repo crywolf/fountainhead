@@ -17,7 +17,7 @@ pub struct RobustSoliton {
 impl RobustSoliton {
     #![expect(clippy::needless_range_loop)]
 
-    /// Construct a new Robust Soliton Distribution for the given number of source symbols `k`,
+    /// Constructs a new Robust Soliton Distribution for the given number of source symbols `k`,
     /// constant factor `c` and failure probability `delta`.
     ///
     /// Constant factor is typically 0.03 to 0.1, Failure probability typically 0.01 to 0.5.
@@ -38,6 +38,11 @@ impl RobustSoliton {
 
         distribution.build_cdf();
         distribution
+    }
+
+    /// Constructs a new Robust Soliton Distribution for the given number of source symbols `k`, with opinionated `c` and `delta` parameters
+    pub fn with_default_params(k: usize) -> Self {
+        Self::new(k, 0.06, 0.01)
     }
 
     /// The number of encoded symbols required at the receiving end to ensure that the
@@ -68,7 +73,7 @@ impl RobustSoliton {
         }
     }
 
-    /// Compute the robust soliton probability mass function (PMF)
+    /// Computes the robust soliton probability mass function (PMF)
     fn compute_pmf(&self) -> Vec<f64> {
         // Ideal soliton distribution
         let ideal = self.ideal_soliton();

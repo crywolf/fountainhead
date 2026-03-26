@@ -46,7 +46,7 @@ fn main() -> Result<()> {
     };
 
     let degree_distribution =
-        RobustSoliton::new(compressor_config.super_blocks_per_epoch, 0.06, 0.01);
+        RobustSoliton::with_default_params(compressor_config.super_blocks_per_epoch);
 
     let min_required_droplets_in_epoch = degree_distribution.min_encoded_symbols();
 
