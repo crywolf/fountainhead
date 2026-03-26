@@ -78,18 +78,30 @@ impl<'a> FountainDecoder<'a> {
                 // Check if all the blocks are valid, ie. that they correspond to the longest header-chain
                 // if not => reject the whole droplet
                 let mut valid_super_block = true;
-                for block_hash in unknown_superblock
+
+                let block_hashes = match unknown_superblock
                     .block_hashes()
-                    .context("get block hashes from superblock")?
-                // TODO ^ should not return error here, but rather mark the droplet invalid
+                    .context("get block hashes from superblock")
                 {
+                    Ok(hashes) => hashes,
+                    Err(_) => {
+                        // Do not return error here, but rather mark the droplet invalid
+                        // store the droplet position for removal
+                        invalid_droplets.push(position);
+                        valid_super_block = false;
+                        log::warn!("Invalid droplet {}", droplet.num);
+                        vec![]
+                    }
+                };
+
+                for block_hash in block_hashes {
                     // Look up a block in the header-chain using its hash
                     if !self.header_chain.validate_presence(&block_hash) {
                         // invalid block
                         // store the droplet position for removal
                         invalid_droplets.push(position);
-                        log::warn!("Invalid droplet {}", droplet.num);
                         valid_super_block = false;
+                        log::warn!("Invalid droplet {}", droplet.num);
                         break;
                     }
                 }
@@ -109,8 +121,12 @@ impl<'a> FountainDecoder<'a> {
         }
 
         // Remove invalid droplets
-        for i in invalid_droplets.iter().rev() {
-            self.encoded_droplets.swap_remove(*i);
+        for i in invalid_droplets.into_iter().rev() {
+            if self.encoded_droplets.len() == 1 {
+                self.encoded_droplets.remove(i);
+            } else {
+                self.encoded_droplets.swap_remove(i);
+            }
         }
 
         Ok(())

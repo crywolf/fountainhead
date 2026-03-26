@@ -93,7 +93,7 @@ fn main() -> Result<()> {
         }
         Command::Restore => {
             let decompressor =
-                Decompressor::new(decompressor_config).context("create compressor")?;
+                Decompressor::new(decompressor_config).context("create decompressor")?;
 
             decompressor.restore_blockchain()?;
         }
