@@ -53,15 +53,15 @@ impl HeaderChain {
     }
 
     /// Generates header-chain from blockchain. Directory containing BTC blockchain data used to create header-chain
-    pub fn generate(&mut self, source_data_dir: &str) -> Result<()> {
+    pub fn generate(&mut self, source_blockchain_dir: &str) -> Result<()> {
         let context = ContextBuilder::new()
             .chain_type(ChainType::Signet)
             .build()
             .context("build context")?;
 
-        let input_blocks_dir = format!("{}/blocks", source_data_dir);
+        let input_blocks_dir = format!("{}/blocks", source_blockchain_dir);
         let input_chainman = InputChainstateManager::from(
-            ChainstateManagerBuilder::new(&context, source_data_dir, &input_blocks_dir)?
+            ChainstateManagerBuilder::new(&context, source_blockchain_dir, &input_blocks_dir)?
                 .build()
                 .context("build InputChainstateManager")?,
         );

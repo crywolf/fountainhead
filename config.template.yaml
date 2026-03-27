@@ -1,6 +1,12 @@
-source_data_dir: /source_signet
-output_data_dir: /dest_signet
+source_blockchain_dir: /source_signet
+output_blockchain_dir: /dest_signet
 droplets_dir: /droplets
-epochs_to_encode: 0 # 0 means the whole blockchain
-super_blocks_per_epoch: 1000
+
+# where the header-chain will be stored
+header_chain_dir: /headerchain
+
+# 0 means all epochs, ie. the whole blockchain
+epochs_to_encode: 0
+
+super_blocks_per_epoch: 2000
 storage_reduction_ratio: 10

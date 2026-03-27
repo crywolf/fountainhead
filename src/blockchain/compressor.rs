@@ -15,7 +15,7 @@ pub struct Config {
     pub droplets_dir: String,
 
     /// Directory containing BTC blockchain data to be compressed
-    pub source_data_dir: String,
+    pub source_blockchain_dir: String,
 
     /// How many super blocks are produced in an epoch.
     /// An epoch is defined as the time required for the blockchain to grow by `k` blocks (e.g., `k` = 10000).
@@ -48,10 +48,14 @@ impl Compressor {
             .chain_type(ChainType::Signet)
             .build()?;
 
-        let input_blocks_dir = format!("{}/blocks", &config.source_data_dir);
+        let input_blocks_dir = format!("{}/blocks", &config.source_blockchain_dir);
         let input_chainman = InputChainstateManager::from(
-            ChainstateManagerBuilder::new(&context, &config.source_data_dir, &input_blocks_dir)?
-                .build()?,
+            ChainstateManagerBuilder::new(
+                &context,
+                &config.source_blockchain_dir,
+                &input_blocks_dir,
+            )?
+            .build()?,
         );
 
         Ok(Self {
@@ -298,10 +302,7 @@ impl Compressor {
                     "Compressing epoch #{epoch}, processed block height: {}",
                     height
                 );
-                println!(
-                    "Constructing superblocks for epoch #{epoch}, starting at block height: {}",
-                    already_compressed_blocks
-                );
+                println!("Constructing superblocks for epoch #{epoch}");
 
                 super_blocks_count = 0;
                 superblock_storage = TmpFileStorage::new()

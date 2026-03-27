@@ -18,7 +18,7 @@ pub struct Config {
     pub super_blocks_per_epoch: usize,
 
     /// Directory where the restored BTC blockchain should be placed
-    pub output_data_dir: String,
+    pub output_blockchain_dir: String,
 
     /// Number of worker threads for block validation
     pub worker_threads: i32,
@@ -36,11 +36,15 @@ impl Decompressor {
             .chain_type(ChainType::Signet)
             .build()?;
 
-        let output_blocks_dir = format!("{}/blocks", &config.output_data_dir);
+        let output_blocks_dir = format!("{}/blocks", &config.output_blockchain_dir);
         let output_chainman = OutputChainstateManager::from(
-            ChainstateManagerBuilder::new(&context, &config.output_data_dir, &output_blocks_dir)?
-                .worker_threads(config.worker_threads)
-                .build()?,
+            ChainstateManagerBuilder::new(
+                &context,
+                &config.output_blockchain_dir,
+                &output_blocks_dir,
+            )?
+            .worker_threads(config.worker_threads)
+            .build()?,
         );
 
         let header_chain = HeaderChain::new(crate::blockchain::headerchain::Config {

@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
     let compressor_config = compressor::Config {
         droplets_dir: args.droplets_dir.clone(),
-        source_data_dir: args.source_data_dir.clone(),
+        source_blockchain_dir: args.source_blockchain_dir.clone(),
         super_blocks_per_epoch,
         epochs_to_encode: args.epochs_to_encode,
         storage_reduction_ratio,
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         droplets_dir: args.droplets_dir.clone(),
         header_chain_dir: args.header_chain_dir,
         super_blocks_per_epoch,
-        output_data_dir: args.output_data_dir,
+        output_blockchain_dir: args.output_blockchain_dir,
         worker_threads: WORKER_THREADS,
     };
 
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             let mut header_chain =
                 HeaderChain::new(header_chain_config).context("create header chain producer")?;
 
-            header_chain.generate(&args.source_data_dir)?;
+            header_chain.generate(&args.source_blockchain_dir)?;
         }
         Command::Restore => {
             let decompressor =
@@ -99,14 +99,15 @@ fn main() -> Result<()> {
             decompressor.restore_blockchain()?;
         }
         Command::PurgeDroplets => {
-            for epoch in 0..args.epochs_to_encode {
+            let epochs = FileStorage::epoch_count(&args.droplets_dir)?;
+            for epoch in 0..epochs {
                 let droplet_storage = FileStorage::new(&args.droplets_dir, epoch)
                     .with_context(|| format!("open droplet storage for epoch {}", epoch))?;
                 droplet_storage
                     .truncate()
                     .with_context(|| format!("truncate droplet storage for epoch {}", epoch))?
             }
-            println!("Droplets for {} epochs were purged", args.epochs_to_encode);
+            println!("Droplets for {} epochs were purged", epochs);
         }
     }
 

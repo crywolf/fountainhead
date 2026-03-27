@@ -8,8 +8,8 @@ use serde::Deserialize;
 pub struct Args {
     /// The name of the called command
     pub command: Command,
-    pub source_data_dir: String,
-    pub output_data_dir: String,
+    pub source_blockchain_dir: String,
+    pub output_blockchain_dir: String,
     pub droplets_dir: String,
     pub header_chain_dir: String,
     pub epochs_to_encode: usize,
@@ -35,8 +35,8 @@ impl Args {
 
         Ok(Self {
             command: args.command,
-            source_data_dir: config.source_data_dir,
-            output_data_dir: config.output_data_dir,
+            source_blockchain_dir: config.source_blockchain_dir,
+            output_blockchain_dir: config.output_blockchain_dir,
             droplets_dir: config.droplets_dir,
             header_chain_dir: config.header_chain_dir,
             epochs_to_encode: config.epochs_to_encode,
@@ -76,8 +76,8 @@ pub enum Command {
 
 #[derive(Deserialize)]
 struct ConfigYaml {
-    source_data_dir: String,
-    output_data_dir: String,
+    source_blockchain_dir: String,
+    output_blockchain_dir: String,
     droplets_dir: String,
     header_chain_dir: String,
     epochs_to_encode: usize,
