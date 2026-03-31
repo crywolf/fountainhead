@@ -1,12 +1,29 @@
+####################
+### DROPLET NODE ###
+
+# Path to directory containing BTC blockchain data to be encoded to droplets
 source_blockchain_dir: /source_signet
-output_blockchain_dir: /dest_signet
-droplets_dir: /droplets
 
-# where the header-chain will be stored
-header_chain_dir: /headerchain
-
-# 0 means all epochs, ie. the whole blockchain
+# Number of epochs to encode, 0 means all epochs, ie. the whole blockchain
 epochs_to_encode: 0
 
+# How many super blocks are produced in an epoch.
 super_blocks_per_epoch: 2000
+
+# Storage reduction ratio. For example 10 means 1:10 blockchain disk space savings.
 storage_reduction_ratio: 10
+
+###################
+### BUCKET NODE ###
+
+# Path to directory where the restored BTC blockchain should be placed
+output_blockchain_dir: /dest_signet
+
+##############
+### COMMON ###
+
+# Path to droplets directory
+droplets_dir: /droplets
+
+# Path to directory here the header-chain will be stored and read from
+header_chain_dir: /headerchain

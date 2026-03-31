@@ -75,7 +75,7 @@ impl SuperBlock {
         SUPERBLOCK_MAX_SIZE - self.raw_bytes.len()
     }
 
-    // Returns block hashes of the contained blocks
+    /// Returns block hashes of the contained blocks
     pub fn block_hashes(&mut self) -> anyhow::Result<Vec<[u8; 32]>> {
         self.crop_padding();
 

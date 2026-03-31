@@ -95,7 +95,12 @@ impl<'a> FountainDecoder<'a> {
                 };
 
                 for block_hash in block_hashes {
-                    // Look up a block in the header-chain using its hash
+                    // Look up a block in the header-chain using its hash.
+                    // FIXME 1: We should also compute and check if Merkle root of the block matches the Merkle root
+                    // stored in header-chain, but `bitcoinkernel` does not currently
+                    // provide method to access Merkle root.
+                    // FIXME 2: We also should check that blocks are in correct order, ie. previous hash
+                    // points to the correct predecessor.
                     if !self.header_chain.validate_presence(&block_hash) {
                         // invalid block
                         // store the droplet position for removal

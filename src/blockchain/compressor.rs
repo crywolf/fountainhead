@@ -14,7 +14,7 @@ pub struct Config {
     /// Droplets directory
     pub droplets_dir: String,
 
-    /// Directory containing BTC blockchain data to be compressed
+    /// Path to directory containing BTC blockchain data to be encoded to droplets
     pub source_blockchain_dir: String,
 
     /// How many super blocks are produced in an epoch.
