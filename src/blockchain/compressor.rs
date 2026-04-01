@@ -10,6 +10,9 @@ use crate::{
     super_block::{RawBlock, SuperBlock},
 };
 
+const EPOCHS_COUNT_FILE: &str = "epochs_count.dat";
+const LAST_COMPRESSED_BLOCK_FILE: &str = "last_compressed_block.dat";
+
 pub struct Config {
     /// Droplets directory
     pub droplets_dir: String,
@@ -33,15 +36,11 @@ pub struct Compressor {
     config: Config,
     input_chainman: InputChainstateManager,
     encoder: FountainEncoder<RobustSoliton, TmpFileStorage>,
-    //TODO
-    //encoder: crate::encoder::dummy_encoder::DummyEncoder<RobustSoliton, TmpFileStorage>,
 }
 
 impl Compressor {
     pub fn new(
         config: Config,
-        // TODO
-        //encoder: crate::encoder::dummy_encoder::DummyEncoder<RobustSoliton, TmpFileStorage>,
         encoder: FountainEncoder<RobustSoliton, TmpFileStorage>,
     ) -> Result<Self> {
         let context = ContextBuilder::new()
@@ -66,9 +65,6 @@ impl Compressor {
     }
 
     pub fn generate_droplets(&mut self) -> Result<()> {
-        const EPOCHS_COUNT_FILE: &str = "epochs_count.dat";
-        const LAST_COMPRESSED_BLOCK_FILE: &str = "last_compressed_block.dat";
-
         let chain = self.input_chainman.inner.active_chain();
         let chain_height = chain.height() as usize;
         println!("Input chain height: {}", chain_height);
@@ -78,8 +74,6 @@ impl Compressor {
         } else {
             self.config.epochs_to_encode
         };
-
-        let encoder = &mut self.encoder;
 
         let mut epoch_processed_blocks;
         let mut previous_total_processed_blocks = 0;
@@ -92,24 +86,17 @@ impl Compressor {
         if FileStorage::epoch_count(&self.config.droplets_dir).unwrap_or_default() > 1 {
             // Resuming interrupted compression
 
-            // TODO put path creation into function
-            let epochs_count_file_path =
-                format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
-            let epochs_count =
-                fs::read_to_string(epochs_count_file_path).unwrap_or_else(|_| "0".to_string());
+            // Read progress from files
+            let epochs_count = fs::read_to_string(self.epochs_count_file_path())
+                .unwrap_or_else(|_| "0".to_string());
             let already_compressed_epochs = epochs_count
                 .parse::<usize>()
                 .context("parse already_compressed_epochs string")?;
 
             epoch = already_compressed_epochs;
 
-            // TODO put path creation into function
-            let last_block_file_path = format!(
-                "{}/{}",
-                self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
-            );
             let last_compressed_block =
-                fs::read_to_string(last_block_file_path).unwrap_or_else(|_| "0".to_string());
+                fs::read_to_string(self.last_block_file_path()).unwrap_or_else(|_| "0".to_string());
             already_compressed_blocks = last_compressed_block
                 .parse::<usize>()
                 .context("parse last_compressed_block string")?;
@@ -237,7 +224,8 @@ impl Compressor {
                 let mut droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                     .with_context(|| format!("create droplet storage for epoch {}", epoch))?;
 
-                encoder.init_epoch(epoch, superblock_storage, droplet_storage.count());
+                self.encoder
+                    .init_epoch(epoch, superblock_storage, droplet_storage.count());
                 let mut rng = rand::rng();
 
                 // Number of droplets according to compression ratio
@@ -250,7 +238,8 @@ impl Compressor {
                 );
 
                 for num in 0..produced_droplets {
-                    let droplet = encoder
+                    let droplet = self
+                        .encoder
                         .generate_droplet(&mut rng)
                         .with_context(|| format!("generate droplet {}", num))?;
 
@@ -276,7 +265,9 @@ impl Compressor {
                 println!();
 
                 // Get rid of processed superblock files eagerly to save used disk space without delay
-                encoder.truncate_storage().context("truncate storage")?;
+                self.encoder
+                    .truncate_storage()
+                    .context("truncate storage")?;
 
                 processed_blocks_height = height;
 
@@ -284,16 +275,12 @@ impl Compressor {
                     println!("Last requested epoch #{} reached, finishing", epoch);
                     break;
                 } else {
-                    // Store last compressed epoch and block to enable resuming interrupted compression
-                    let epochs_count_file_path =
-                        format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
-                    fs::write(epochs_count_file_path, (epoch + 1).to_string())?;
-
-                    let last_block_file_path = format!(
-                        "{}/{}",
-                        &self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
-                    );
-                    fs::write(last_block_file_path, processed_blocks_height.to_string())?;
+                    // Store last compressed epoch and block to enable resuming of interrupted encoding
+                    fs::write(self.epochs_count_file_path(), (epoch + 1).to_string())?;
+                    fs::write(
+                        self.last_block_file_path(),
+                        processed_blocks_height.to_string(),
+                    )?;
                 }
 
                 // Start new epoch
@@ -333,17 +320,21 @@ impl Compressor {
             processed_blocks_height
         );
 
-        // TODO put path creation into function
-        let epochs_count_file_path = format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE);
-        _ = fs::remove_file(epochs_count_file_path);
-
-        // TODO put path creation into function
-        let last_block_file_path = format!(
-            "{}/{}",
-            self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
-        );
-        _ = fs::remove_file(last_block_file_path);
+        // Remove progress storing files
+        _ = fs::remove_file(self.epochs_count_file_path());
+        _ = fs::remove_file(self.last_block_file_path());
 
         Ok(())
+    }
+
+    fn epochs_count_file_path(&self) -> String {
+        format!("{}/{}", self.config.droplets_dir, EPOCHS_COUNT_FILE)
+    }
+
+    fn last_block_file_path(&self) -> String {
+        format!(
+            "{}/{}",
+            self.config.droplets_dir, LAST_COMPRESSED_BLOCK_FILE
+        )
     }
 }

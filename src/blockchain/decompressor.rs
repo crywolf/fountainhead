@@ -190,11 +190,6 @@ where
             }
             // Next epoch
             println!();
-
-            // Remove used droplet files // TODO
-            // droplet_storage
-            //     .truncate()
-            //     .with_context(|| format!("truncate droplet storage for epoch {}", epoch))?;
         }
 
         ///////////////////////
