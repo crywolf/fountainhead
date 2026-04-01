@@ -25,5 +25,6 @@ output_blockchain_dir: /dest_signet
 # Path to droplets directory
 droplets_dir: /droplets
 
-# Path to directory here the header-chain will be stored and read from
-header_chain_dir: /headerchain
+# Path to directory where the header-chain will be stored and read from
+# Usually the same as 'output_blockchain_dir'
+header_chain_dir: /dest_signet

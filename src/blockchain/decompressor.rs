@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{ChainType, ChainstateManagerBuilder, ContextBuilder, ProcessBlockResult};
 
 use crate::{
-    blockchain::{OutputChainstateManager, headerchain::HeaderChain, print_progress},
+    blockchain::{OutputChainstateManager, headerchain::HeaderChainValidator, print_progress},
     decoder::fountain_decoder::FountainDecoder,
     storage::{Storage, file_storage::FileStorage},
 };
@@ -24,37 +24,40 @@ pub struct Config {
     pub worker_threads: i32,
 }
 
-pub struct Decompressor {
+pub struct Decompressor<H>
+where
+    H: HeaderChainValidator,
+{
     config: Config,
     output_chainman: OutputChainstateManager,
-    header_chain: HeaderChain,
+    header_chain_validator: Option<H>,
 }
 
-impl Decompressor {
-    pub fn new(config: Config) -> Result<Self> {
+impl<H> Decompressor<H>
+where
+    H: HeaderChainValidator,
+{
+    pub fn new(config: Config, header_chain_validator: Option<H>) -> Result<Self> {
         let context = ContextBuilder::new()
             .chain_type(ChainType::Signet)
             .build()?;
 
         let output_blocks_dir = format!("{}/blocks", &config.output_blockchain_dir);
-        let output_chainman = OutputChainstateManager::from(
-            ChainstateManagerBuilder::new(
-                &context,
-                &config.output_blockchain_dir,
-                &output_blocks_dir,
-            )?
-            .worker_threads(config.worker_threads)
-            .build()?,
-        );
+        let chainman = ChainstateManagerBuilder::new(
+            &context,
+            &config.output_blockchain_dir,
+            &output_blocks_dir,
+        )?
+        .worker_threads(config.worker_threads)
+        .build()?;
 
-        let header_chain = HeaderChain::new(crate::blockchain::headerchain::Config {
-            header_chain_dir: config.header_chain_dir.clone(),
-        })?;
+        let output_chainman = OutputChainstateManager::new(chainman, &config.output_blockchain_dir)
+            .context("create output chain manager")?;
 
         Ok(Self {
             config,
             output_chainman,
-            header_chain,
+            header_chain_validator,
         })
     }
 
@@ -73,7 +76,13 @@ impl Decompressor {
             println!("Reconstructed chain height: {}", out_chain.height());
             println!("Restoring epoch #{epoch}");
 
-            let mut decoder = FountainDecoder::new(&self.header_chain)?;
+            // Header-chain is either in external header-chain dir or directly in output blockchain dir
+            let header_chain_validator = if let Some(h) = &self.header_chain_validator {
+                h
+            } else {
+                &self.output_chainman as &dyn HeaderChainValidator
+            };
+            let mut decoder = FountainDecoder::new(header_chain_validator)?;
 
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                 .with_context(|| format!("open droplet storage for epoch {}", epoch))?;

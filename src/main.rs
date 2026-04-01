@@ -54,7 +54,6 @@ fn main() -> Result<()> {
     let droplets_produced_in_epoch = super_blocks_per_epoch.div_ceil(storage_reduction_ratio);
     let repetitions_needed = min_required_droplets_in_epoch.div_ceil(droplets_produced_in_epoch);
 
-    //let encoder = fountainhead::encoder::dummy_encoder::DummyEncoder::new(degree_distribution); // TODO
     let encoder = FountainEncoder::new(degree_distribution);
 
     match args.command {
@@ -70,6 +69,7 @@ fn main() -> Result<()> {
             // Run droplet generation just once
             compressor.generate_droplets()?;
         }
+
         Command::GenerateAll => {
             let mut compressor =
                 Compressor::new(compressor_config, encoder).context("create compressor")?;
@@ -86,18 +86,32 @@ fn main() -> Result<()> {
                 compressor.generate_droplets()?;
             }
         }
+
         Command::HeaderChain => {
             let mut header_chain =
                 HeaderChain::new(header_chain_config).context("create header chain producer")?;
 
             header_chain.generate(&args.source_blockchain_dir)?;
         }
+
         Command::Restore => {
-            let decompressor =
-                Decompressor::new(decompressor_config).context("create decompressor")?;
+            let header_chain = if decompressor_config.output_blockchain_dir
+                == decompressor_config.header_chain_dir
+            {
+                None // will use output chain manager to validate against header-chain directly in blockchain dir
+            } else {
+                // will validate against header-chain in a separate dir
+                Some(
+                    HeaderChain::new(header_chain_config)
+                        .context("create header chain validator")?,
+                )
+            };
+            let decompressor = Decompressor::new(decompressor_config, header_chain)
+                .context("create decompressor")?;
 
             decompressor.restore_blockchain()?;
         }
+
         Command::PurgeDroplets => {
             let epochs = FileStorage::epoch_count(&args.droplets_dir)?;
             for epoch in 0..epochs {

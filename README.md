@@ -1,13 +1,12 @@
 # Fountainhead*
 
-## Fountain Coded Blocks for Useful Blockchain Pruning
+## Fountain Coded Blocks for Useful Bitcoin Blockchain Pruning
 
 *no association with [Ayn Rand][Rand]
 
-SeF: A Secure Fountain Architecture for Slashing Storage
-Costs in Blockchains
+SeF: A Secure Fountain Architecture for Slashing Storage Costs in Bitcoin Blockchain
 
-Pruned nodes are nodes that do not store the full archival history of blocks. So whilst a pruned node is useful because it can still enforce the rules of the system (i.e. validate and relay new blocks and transactions), the only thing it currently cannot do is serve a complete copy of the blockchain to new nodes joining the network.
+Pruned nodes are nodes that do not store the full archival history of bitcoin blocks. So whilst a pruned node is useful because it can still enforce the rules of the system (i.e. validate and relay new blocks and transactions), the only thing it currently cannot do is serve a complete copy of the blockchain to new nodes joining the network.
 
 **This tool allows nodes to prune data, yet still assist in initial block download of new nodes**. The idea is based on the following paper: [https://arxiv.org/pdf/1906.12140][paper].
 

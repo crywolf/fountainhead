@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 
-use crate::blockchain::headerchain::HeaderChain;
+use crate::blockchain::headerchain::HeaderChainValidator;
 use crate::droplet::{Droplet, Neighbor};
 use crate::storage::Storage;
 use crate::storage::tmp_file_storage::TmpFileStorage;
@@ -10,20 +10,26 @@ use crate::super_block::SuperBlock;
 
 /// Fountain decoder is a peeling decoder for a Luby Transform (LT) code.
 /// It decodes a droplet containing requested superblock from a set of LT encoded droplets.
-pub struct FountainDecoder<'a> {
+pub struct FountainDecoder<'a, H>
+where
+    H: HeaderChainValidator + ?Sized,
+{
     /// Received encoded symbols (droplets)
     encoded_droplets: Vec<Droplet>,
     /// Decoded superblocks (indexed by superblock number)
     recovered_super_blocks: TmpFileStorage,
     /// Already decoded neighbors
     known_neighbors: HashSet<usize>,
-    /// Header-chain manager used to reject invalid ("murky" or "opaque") droplets
-    header_chain: &'a HeaderChain,
+    /// Header-chain validator used to reject invalid ("murky" or "opaque") droplets
+    header_chain: &'a H,
 }
 
-impl<'a> FountainDecoder<'a> {
+impl<'a, H> FountainDecoder<'a, H>
+where
+    H: HeaderChainValidator + ?Sized,
+{
     /// Create a new decoder
-    pub fn new(header_chain: &'a HeaderChain) -> Result<Self> {
+    pub fn new(header_chain: &'a H) -> Result<Self> {
         Ok(Self {
             encoded_droplets: Vec::new(),
             recovered_super_blocks: TmpFileStorage::new()

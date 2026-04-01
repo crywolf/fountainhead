@@ -1,23 +1,49 @@
-use std::cell::RefCell;
-
 use anyhow::{Context as _, Result};
 use bitcoinkernel::{
-    BlockHash, BlockHeader, ChainType, ChainstateManagerBuilder, ContextBuilder,
-    ProcessBlockHeaderResult, core::BlockHashExt,
+    BlockHash, ChainType, ChainstateManagerBuilder, ContextBuilder, ProcessBlockHeaderResult,
+    core::BlockHashExt,
 };
-use rusty_leveldb::{DB, Options};
 
-use crate::blockchain::{HeaderChainstateManager, InputChainstateManager};
+use crate::blockchain::{HeaderChainstateManager, InputChainstateManager, leveldb::LevelDB};
+
+pub trait HeaderChainValidator {
+    /// Returns true if the block is part of the header-chain, and false otherwise.
+    fn validate_presence(&self, block_hash: &[u8; 32]) -> bool;
+}
 
 pub struct Config {
-    /// Header-chain directory // TODO use the output dir
+    /// Header-chain directory
     pub header_chain_dir: String,
 }
 
 /// The header-chain manager
 pub struct HeaderChain {
     header_chainman: HeaderChainstateManager,
-    database: RefCell<DB>,
+    db: LevelDB,
+}
+
+impl HeaderChainValidator for HeaderChain {
+    /// Returns true if the block is part of the header-chain, and false otherwise.
+    /// Also returns false if some block data or header deserializations fail.
+    fn validate_presence(&self, block_hash: &[u8; 32]) -> bool {
+        let block_hash = if let Ok(block_hash) = BlockHash::new(block_hash) {
+            block_hash
+        } else {
+            return false;
+        };
+
+        if self
+            .db
+            .lookup_header(&block_hash.to_bytes())
+            .is_ok_and(|v| v.is_some())
+        {
+            // valid
+            true
+        } else {
+            //invalid
+            false
+        }
+    }
 }
 
 impl HeaderChain {
@@ -34,21 +60,11 @@ impl HeaderChain {
                 .context("build HeaderChainstateManager")?,
         );
 
-        let db_path = std::path::Path::new(&config.header_chain_dir)
-            .join("blocks")
-            .join("index");
-
-        let options = Options {
-            create_if_missing: false,
-            ..Default::default()
-        };
-
-        let database =
-            RefCell::new(DB::open(&db_path, options).context("open header-chain database")?);
+        let db = LevelDB::open(&config.header_chain_dir).context("header-chain db")?;
 
         Ok(Self {
             header_chainman,
-            database,
+            db,
         })
     }
 
@@ -104,44 +120,5 @@ impl HeaderChain {
         }
 
         Ok(())
-    }
-
-    /// Returns true if the block is part of the header-chain, and false otherwise.
-    /// Also returns false if some block data or header deserializations fail.
-    pub fn validate_presence(&self, block_hash: &[u8; 32]) -> bool {
-        let block_hash = if let Ok(block_hash) = BlockHash::new(block_hash) {
-            block_hash
-        } else {
-            return false;
-        };
-
-        if self
-            .lookup_header(&block_hash.to_bytes())
-            .is_ok_and(|v| v.is_some())
-        {
-            // valid
-            true
-        } else {
-            //invalid
-            false
-        }
-    }
-
-    fn lookup_header(&self, block_hash: &[u8; 32]) -> Result<Option<BlockHeader>> {
-        // LevelDB keys for block index entries follow a specific format
-        // The key format is: 'b' + block_hash (in little-endian)
-        let mut key = vec![b'b'];
-        key.extend_from_slice(block_hash);
-
-        match self.database.borrow_mut().get(&key) {
-            Some(bytes) => {
-                // First X bytes contain some metadata => ignore them, last 80 bytes are the header bytes
-                let header = BlockHeader::new(&bytes[bytes.len() - 80..])
-                    .context("create header from bytes")
-                    .inspect_err(|e| log::error!("Error looking up block header: {}", e))?;
-                Ok(Some(header))
-            }
-            None => Ok(None),
-        }
     }
 }

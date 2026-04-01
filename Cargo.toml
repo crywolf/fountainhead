@@ -2,7 +2,7 @@
 name = "fountainhead"
 version = "0.1.0"
 edition = "2024"
-description = "Fountain Coded Blocks for Useful Blockchain Pruning"
+description = "Fountain Coded Blocks for Useful Bitcoin Blockchain Pruning"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/crywolf/fountainhead"
