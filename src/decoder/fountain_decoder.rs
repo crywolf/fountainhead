@@ -83,7 +83,6 @@ where
 
                 // Check if all the blocks are valid, ie. that they correspond to the longest header-chain
                 // if not => reject the whole droplet
-                let mut valid_super_block = true;
 
                 let block_hashes = match unknown_superblock
                     .block_hashes()
@@ -94,35 +93,19 @@ where
                         // Do not return error here, but rather mark the droplet invalid
                         // store the droplet position for removal
                         invalid_droplets.push(position);
-                        valid_super_block = false;
-                        log::warn!("Invalid droplet {}: {}", droplet.num, e);
+                        log::warn!("Invalid superblock in droplet {}: {}", droplet.num, e);
                         vec![]
                     }
                 };
 
-                for block_hash in block_hashes {
-                    // Look up a block in the header-chain using its hash.
-                    // FIXME 1: We should also compute and check if Merkle root of the block matches the Merkle root
-                    // stored in header-chain, but `bitcoinkernel` does not currently
-                    // provide method to access Merkle root.
-                    // FIXME 2: We also should check that blocks are in correct order, ie. previous hash
-                    // points to the correct predecessor.
-                    if !self.header_chain.validate_presence(&block_hash) {
-                        // invalid block
-                        // store the droplet position for removal
-                        invalid_droplets.push(position);
-                        valid_super_block = false;
-                        log::warn!("Invalid droplet {}", droplet.num);
-                        break;
-                    }
+                // Check if contained blocks are part of the header-chain
+                if !self.header_chain.validate_blocks(&block_hashes) {
+                    log::warn!("Invalid superblock in droplet {}", droplet.num);
+                    invalid_droplets.push(position);
+                    break;
                 }
 
-                if !valid_super_block {
-                    continue;
-                }
-
-                // Valid superblock
-
+                // Superblock is valid, store it
                 self.recovered_super_blocks
                     .insert(&unknown_neighbor.into(), unknown_superblock)
                     .context("insert recovered superblock to storage")?;

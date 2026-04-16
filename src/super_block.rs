@@ -3,7 +3,7 @@ use std::io::{Cursor, Read};
 use anyhow::{Context, Result};
 use bitcoin_consensus_encoding as encoding;
 use bitcoinkernel::Block;
-use bitcoinkernel::core::BlockHashExt;
+use bitcoinkernel::core::{BlockHashExt, BlockHeaderExt};
 use encoding::CompactSizeDecoderError;
 
 use encoding::{
@@ -75,8 +75,8 @@ impl SuperBlock {
         SUPERBLOCK_MAX_SIZE - self.raw_bytes.len()
     }
 
-    /// Returns block hashes of the contained blocks
-    pub fn block_hashes(&mut self) -> anyhow::Result<Vec<[u8; 32]>> {
+    /// Returns block hashes of contained blocks
+    pub fn block_hashes(&mut self) -> anyhow::Result<Vec<BlockHashesPair>> {
         self.crop_padding();
 
         let mut hashes = Vec::with_capacity(self.block_count());
@@ -89,9 +89,15 @@ impl SuperBlock {
                 .read_exact(&mut raw_bytes)
                 .context("read raw block bytes")?;
 
-            let block = RawBlock::new(&raw_bytes);
+            let block = RawBlock::new(&raw_bytes).to_block()?;
+            let block_header = block.header();
 
-            hashes.push(block.to_block()?.hash().to_bytes());
+            let hash_pair = BlockHashesPair {
+                current: block_header.hash().to_bytes(),
+                previous: block_header.prev_hash().to_bytes(),
+            };
+
+            hashes.push(hash_pair);
         }
 
         Ok(hashes)
@@ -209,6 +215,23 @@ impl RawBlock {
     /// Returns [`bitcoinkernel::Block`]
     pub fn to_block(&self) -> Result<Block> {
         Block::new(&self.raw_bytes).context("new block from encodable block")
+    }
+}
+
+/// Pair of block hash and previous block hash
+#[derive(Clone, Copy)]
+pub struct BlockHashesPair {
+    current: [u8; 32],
+    previous: [u8; 32],
+}
+
+impl BlockHashesPair {
+    pub fn current(self) -> [u8; 32] {
+        self.current
+    }
+
+    pub fn previous(self) -> [u8; 32] {
+        self.previous
     }
 }
 
