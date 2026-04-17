@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 
+use crate::blockchain;
 use crate::blockchain::headerchain::HeaderChainValidator;
 use crate::droplet::{Droplet, Neighbor};
 use crate::storage::Storage;
@@ -48,7 +49,7 @@ where
 
     /// Decodes added droplets
     pub fn decode(&mut self) -> Result<()> {
-        let mut invalid_droplets = Vec::new();
+        let mut droplets_to_remove = Vec::new(); // droplets that we do not need anymore
 
         // For each droplet, XOR out all its known neighbors
         for (position, droplet) in self.encoded_droplets.iter().enumerate() {
@@ -92,16 +93,17 @@ where
                     Err(e) => {
                         // Do not return error here, but rather mark the droplet invalid
                         // store the droplet position for removal
-                        invalid_droplets.push(position);
+                        droplets_to_remove.push(position);
                         log::warn!("Invalid superblock in droplet {}: {}", droplet.num, e);
-                        vec![]
+                        break;
                     }
                 };
 
                 // Check if contained blocks are part of the header-chain
                 if !self.header_chain.validate_blocks(&block_hashes) {
                     log::warn!("Invalid superblock in droplet {}", droplet.num);
-                    invalid_droplets.push(position);
+                    // store the droplet position for removal
+                    droplets_to_remove.push(position);
                     break;
                 }
 
@@ -111,11 +113,19 @@ where
                     .context("insert recovered superblock to storage")?;
 
                 self.known_neighbors.insert(unknown_neighbor.into());
+
+                // store the position of decoded droplet for removal
+                droplets_to_remove.push(position);
             }
         }
 
-        // Remove invalid droplets
-        for i in invalid_droplets.into_iter().rev() {
+        if !droplets_to_remove.is_empty() {
+            // We decoded one or more droplets
+            blockchain::print_progress();
+        }
+
+        // Remove decoded or invalid droplets
+        for i in droplets_to_remove.into_iter().rev() {
             if self.encoded_droplets.len() == 1 {
                 self.encoded_droplets.remove(i);
             } else {

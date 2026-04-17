@@ -1,4 +1,9 @@
-use std::{fs, io::BufReader, io::BufWriter, path::PathBuf};
+use std::{
+    collections::HashSet,
+    fs,
+    io::{BufReader, BufWriter},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use bitcoin_consensus_encoding as encoding;
@@ -8,8 +13,8 @@ use crate::{storage::Storage, super_block::SuperBlock};
 
 pub struct TmpFileStorage {
     dir: TempDir,
-    counter: usize,
     max_file_size: usize,
+    keys: HashSet<usize>,
 }
 
 impl TmpFileStorage {
@@ -19,14 +24,15 @@ impl TmpFileStorage {
 
         Ok(Self {
             dir,
-            counter: 0,
             max_file_size: 0,
+            keys: HashSet::default(),
         })
     }
 
     pub fn truncate(mut self) -> Result<()> {
-        self.counter = 0;
-        Ok(self.dir.close()?)
+        self.dir.close()?;
+        self.keys.clear();
+        Ok(())
     }
 
     fn filepath(&self, key: usize) -> PathBuf {
@@ -41,17 +47,23 @@ impl Storage<usize, SuperBlock> for TmpFileStorage {
         let filepath = self.filepath(*key);
         let tmp_file = fs::File::create(filepath).context("create superblock file")?;
         let writer = BufWriter::new(tmp_file);
-        self.counter += 1;
 
         let superblock_size = sb.size();
         if superblock_size > self.max_file_size {
             self.max_file_size = superblock_size;
         }
 
-        encoding::encode_to_writer(&sb, writer).context("write superblock into a file")
+        encoding::encode_to_writer(&sb, writer).context("write superblock into a file")?;
+        self.keys.insert(*key);
+
+        Ok(())
     }
 
     fn get(&self, key: &usize) -> Result<Option<SuperBlock>> {
+        if !self.keys.contains(key) {
+            return Ok(None);
+        }
+
         let filepath = self.filepath(*key);
         let tmp_file = fs::File::open(filepath).context("read superblock file");
         let tmp_file = match tmp_file {
@@ -70,7 +82,7 @@ impl Storage<usize, SuperBlock> for TmpFileStorage {
     }
 
     fn count(&self) -> usize {
-        self.counter
+        self.keys.len()
     }
 
     fn max_size(&self) -> usize {

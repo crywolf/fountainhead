@@ -13,7 +13,7 @@ use crate::{
     super_block::BlockHashesPair,
 };
 
-fn print_progress() {
+pub fn print_progress() {
     if log::log_enabled!(log::Level::Info) {
         print!(".");
         _ = std::io::stdout().flush();

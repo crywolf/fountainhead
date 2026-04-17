@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result, bail};
 use bitcoinkernel::{ChainType, ChainstateManagerBuilder, ContextBuilder, ProcessBlockResult};
 
 use crate::{
-    blockchain::{OutputChainstateManager, headerchain::HeaderChainValidator, print_progress},
+    blockchain::{OutputChainstateManager, headerchain::HeaderChainValidator},
     decoder::fountain_decoder::FountainDecoder,
     storage::{Storage, file_storage::FileStorage},
 };
@@ -148,14 +148,12 @@ where
                                 }
                             }
                         }
-                        // All blocks from the droplet were inserted into blockchain
+
+                        // All blocks from the droplet were inserted into the blockchain
                         break;
                     } else {
-                        // Add another droplet to the decoder
+                        // Wanted superblock not decoded yet => add another droplet to the decoder
                         log::debug!("Add droplet to decoder: {}", added_droplets_count);
-                        if added_droplets_count.is_multiple_of(100) {
-                            print_progress();
-                        }
 
                         if added_droplets_count < number_of_droplets {
                             let droplet =
@@ -182,10 +180,6 @@ where
                             bail!("Not enough droplets. Obtain or generate more droplets!");
                         }
                     }
-                }
-
-                if superblock_num.is_multiple_of(20) {
-                    print_progress();
                 }
             }
             // Next epoch
