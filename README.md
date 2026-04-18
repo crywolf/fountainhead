@@ -39,7 +39,9 @@ Prerequisites:
 * Installed [Rust][rust].
 * [Signet][signet] bitcoin blockchain.
 
-Run `cargo run -- help` to get all available commands.
+Run `cargo build --release` to build the app
+
+Run `./target/release/fountainhead help` to get all available commands.
 
 ![Fountain CLI screenshot](fountainhead_cli.png)
 
@@ -47,19 +49,17 @@ Note: Configuration options (epoch length, storage reduction ratio, directories 
 
 _From the point of view of droplet node:_
 
-`cargo run -- generate` Encodes blocks to _s_ droplets.
+`./target/release/fountainhead generate` Encodes blocks to _s_ droplets.
 
 _From the point of view of bucket node:_
 
-`cargo run -- generate-all` Generates enough droplets for successful blockchain restoration by repeating the command above. This basically simulates downloading different droplets from different droplet nodes.
+`./target/release/fountainhead generate-all` Generates enough droplets for successful blockchain restoration by repeating the command above. This basically simulates downloading different droplets from different droplet nodes.
 
-`cargo run -- headerchain` Generates header-chain. This corresponds to downloading valid (longest) header-chain.
+`./target/release/fountainhead headerchain` Generates header-chain. This corresponds to downloading valid (longest) header-chain.
 
-`cargo run -- restore` Attempts to restore the original blockchain from droplets. In case of failure, just call `generate` command. This corresponds to downloading few more droplets.
+`./target/release/fountainhead restore` Attempts to restore the original blockchain from droplets. In case of failure, just call `generate` command. This corresponds to downloading few more droplets.
 
 ## Limitations
-
-* Super-block size is limited to 4 MB, because used [bitcoin-consensus-encoding][consensus] crate from [rust-bitcoin][rust-bitcoin] project has a hardcoded limit for length: "Consensus encoded vectors can be up to 4,000,000 bytes long. This is a theoretical max since block size is 4 meg wu and minimum vector element is one byte."
 
 * Used [rust-bitcoinkernel][rust-bitcoinkernel] is a wrapper around [libbitcoinkernel][libbitcoinkernel], an experimental C++ library exposing Bitcoin Core's validation engine. It's API may change as Bitcoin Core evolves and it has some limitations at the moment:
 
@@ -69,7 +69,7 @@ _From the point of view of bucket node:_
 
 * It seems that there is no way for droplet node to be sure that decoded super-block contains all the correct blocks it is supposed to contain. The research [paper][paper] assumes that header-chain contains block sizes, which is not the case!!! If it was true, than surely the bucket node would know what blocks are supposed to be concatenated together in any superblock. This is huge flaw in super-block validation. Is there any possibility to provide this hint to bucket node in a decentralized and inherently adversarial environment?
 
-* The app was tested on signet, which is relatively short and allows for encoding  only around 2 000 super-blocks per epoch, which gives us an overhead of 2 552 (1.26 times more) necessary droplets for successful decoding. Longer epochs allow for much smaller overhead, 10 000 super-blocks long epoch needs 11 396 droplets (1.13 times more).
+* The app was tested on Signet, which is relatively short and allows for encoding only around 1400 super-blocks (of 6 MB size) per epoch, which gives us an overhead of 1849 (1.32 times more) necessary droplets for successful decoding. **Longer epochs allow for much smaller overhead**, 10 000 super-blocks long epoch needs 11 396 droplets (only 1.13 times more).
 
 Note: I determined the default parameters for my degree distribution for encoder (robust soliton distribution) experimentally and checked the correctness of the results with values published in [another paper][paper2].
 
@@ -82,7 +82,5 @@ Note: I determined the default parameters for my degree distribution for encoder
 [degree]: https://en.wikipedia.org/wiki/Degree_distribution
 [rust]: https://rust-lang.org/
 [libbitcoinkernel]: https://github.com/bitcoin/bitcoin/issues/27587
-[consensus]: https://docs.rs/bitcoin-consensus-encoding
-[rust-bitcoin]: https://github.com/rust-bitcoin/rust-bitcoin
 [rust-bitcoinkernel]: https://docs.rs/bitcoinkernel
 [paper2]: https://docs.switzernet.com/people/emin-gabrielyan/060112-capillary-references/ref/MacKay05.pdf

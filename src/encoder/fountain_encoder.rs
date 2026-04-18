@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Display;
 
 use anyhow::Result;
 use rand::distr::Distribution;
@@ -56,7 +57,10 @@ where
     }
 
     /// Generate a droplet containing one or more random superblocks
-    pub fn generate_droplet<R: Rng>(&mut self, rng: &mut R) -> Result<Droplet> {
+    pub fn generate_droplet<R: Rng>(&mut self, rng: &mut R) -> Result<Droplet>
+    where
+        <S as Storage<usize, SuperBlock>>::Error: Display,
+    {
         // To generate a droplet in an epoch, a node first randomly
         // samples a degree d ∈ {1, 2, . . . , k} using the degree distribution
         let degree = self.degree_distribution.sample(rng);
@@ -83,8 +87,8 @@ where
         let mut encoded_superblock = SuperBlock::new(0);
 
         for neighbor in neighbors.iter() {
-            let superblock = storage.get(&neighbor.into()).map_err(|_| {
-                anyhow::anyhow!("Failed to get superblock {} from storage", neighbor)
+            let superblock = storage.get(&neighbor.into()).map_err(|e| {
+                anyhow::anyhow!("Failed to get superblock {} from storage: {}", neighbor, e)
             })?;
 
             let superblock =

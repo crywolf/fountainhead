@@ -11,8 +11,7 @@ use encoding::{
     Decoder2, Decoder3, Encodable, Encoder2, Encoder4, SliceEncoder, VecDecoder,
 };
 
-/// NOTE: 4_000_000 is the limit that can be decoded using [`bitcoin_consensus_encoding::ByteVecDecoder`]
-pub const SUPERBLOCK_MAX_SIZE: usize = 4_000_000;
+pub const SUPERBLOCK_MAX_SIZE: usize = 6_000_000; // 4_000_000 * 1.5
 
 /// SuperBlock represents concatenated blocks (with padding)
 #[derive(Debug, Clone, PartialEq)]
@@ -143,6 +142,7 @@ impl SuperBlock {
     /// Decodes the superblock from a byte slice
     pub fn decode_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         encoding::decode_from_slice(bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to decode superblock from bytes: {e}"))
     }
 }
 
@@ -356,7 +356,7 @@ impl Decodable for SuperBlock {
         let bytes_length = CompactSizeDecoder::new_with_limit(usize::MAX);
 
         let block_sizes = VecDecoder::new();
-        let raw_bytes = ByteVecDecoder::new();
+        let raw_bytes = ByteVecDecoder::new_with_limit(SUPERBLOCK_MAX_SIZE);
 
         SuperBlockDecoder(Decoder2::new(
             Decoder3::new(num, block_count, bytes_length),
@@ -622,7 +622,7 @@ mod tests {
             sb.add(block).unwrap();
         }
 
-        assert_eq!(sb.block_count(), 4);
+        assert_eq!(sb.block_count(), 6);
         assert_eq!(sb.size(), SUPERBLOCK_MAX_SIZE);
 
         // cannot add more

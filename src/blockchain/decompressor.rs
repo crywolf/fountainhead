@@ -82,7 +82,9 @@ where
             } else {
                 &self.output_chainman as &dyn HeaderChainValidator
             };
-            let mut decoder = FountainDecoder::new(header_chain_validator)?;
+
+            let mut decoder =
+                FountainDecoder::new(header_chain_validator, self.config.super_blocks_per_epoch)?;
 
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                 .with_context(|| format!("open droplet storage for epoch {}", epoch))?;

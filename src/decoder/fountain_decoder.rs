@@ -30,12 +30,12 @@ where
     H: HeaderChainValidator + ?Sized,
 {
     /// Create a new decoder
-    pub fn new(header_chain: &'a H) -> Result<Self> {
+    pub fn new(header_chain: &'a H, super_blocks_per_epoch: usize) -> Result<Self> {
         Ok(Self {
-            encoded_droplets: Vec::new(),
+            encoded_droplets: Vec::with_capacity(super_blocks_per_epoch),
             recovered_super_blocks: TmpFileStorage::new()
                 .context("FountainDecoder: Failed to create superblocks storage")?,
-            known_neighbors: HashSet::new(),
+            known_neighbors: HashSet::with_capacity(super_blocks_per_epoch),
             header_chain,
         })
     }
@@ -49,7 +49,7 @@ where
 
     /// Decodes added droplets
     pub fn decode(&mut self) -> Result<()> {
-        let mut droplets_to_remove = Vec::new(); // droplets that we do not need anymore
+        let mut droplets_to_remove = Vec::with_capacity(200); // droplets that we do not need anymore
 
         // For each droplet, XOR out all its known neighbors
         for (position, droplet) in self.encoded_droplets.iter().enumerate() {
