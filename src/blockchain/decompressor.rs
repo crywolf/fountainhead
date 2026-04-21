@@ -83,105 +83,76 @@ where
                 &self.output_chainman as &dyn HeaderChainValidator
             };
 
-            let mut decoder =
-                FountainDecoder::new(header_chain_validator, self.config.super_blocks_per_epoch)?;
-
             let droplet_storage = FileStorage::new(&self.config.droplets_dir, epoch)
                 .with_context(|| format!("open droplet storage for epoch {}", epoch))?;
-
             let number_of_droplets = droplet_storage.count();
+
+            let mut decoder = FountainDecoder::new(
+                droplet_storage,
+                header_chain_validator,
+                self.config.super_blocks_per_epoch,
+            )?;
+
             let number_of_super_blocks = self.config.super_blocks_per_epoch;
 
             println!(
                 "Decoding {number_of_super_blocks} superblocks from available {number_of_droplets} droplets for epoch #{epoch}"
             );
 
-            let mut added_droplets_count: usize = 0;
-
-            // Iterate over all available droplets in epoch
             // We need blocks decoded in order, so we iterate from 0 to number of superblocks
             for superblock_num in 0..number_of_super_blocks {
-                loop {
-                    decoder
-                        .decode()
-                        .context("fountain decoder: recover blocks from droplets")?;
+                if let Some(decoded_superblock) = decoder
+                    .get_decoded_superblock(superblock_num)
+                    .context("get_decoded_superblock")?
+                {
+                    // Next wanted superblock was decoded,
+                    // insert all its blocks into the blockchain
 
-                    if let Some(decoded_superblock) = decoder
-                        .get_decoded_superblock(superblock_num)
-                        .context("get_decoded_superblock")?
-                    {
-                        // Next wanted superblock was decoded,
-                        // insert all its blocks into the blockchain
+                    let num = superblock_num;
+                    log::debug!("- - - Blockchain: Adding superblock {num}");
 
-                        let num = superblock_num;
-                        log::debug!("- - - Blockchain: Adding superblock {num}");
+                    let blocks = decoded_superblock
+                        .into_blocks()
+                        .context("get blocks from superblock");
 
-                        let blocks = decoded_superblock
-                            .into_blocks()
-                            .context("get blocks from superblock");
-
-                        match blocks {
-                            Ok(_) => {}
-                            Err(err) => {
-                                log::error!("{:?}", err);
-                                break;
-                            }
-                        }
-                        let blocks = blocks?;
-                        log::debug!("sblk: {}, blkcount: {}", num, blocks.len());
-
-                        for (i, block) in blocks.into_iter().enumerate() {
-                            match self.output_chainman.inner.process_block(&block.to_block()?) {
-                                ProcessBlockResult::NewBlock => {
-                                    log::debug!(
-                                        "<  Superblock #{num}: block #{i:<2} validated and written to disk"
-                                    )
-                                }
-                                ProcessBlockResult::Duplicate => {
-                                    log::debug!(
-                                        "<  Superblock #{num}: block #{i:<2} already known (valid)"
-                                    )
-                                }
-                                ProcessBlockResult::Rejected => {
-                                    log::error!(
-                                        "!! Superblock #{num}: block #{i:<2} validation failed!"
-                                    );
-                                    bail!("Superblock #{num}: block #{i:<2} validation failed!")
-                                }
-                            }
-                        }
-
-                        // All blocks from the droplet were inserted into the blockchain
-                        break;
-                    } else {
-                        // Wanted superblock not decoded yet => add another droplet to the decoder
-                        log::debug!("Add droplet to decoder: {}", added_droplets_count);
-
-                        if added_droplets_count < number_of_droplets {
-                            let droplet =
-                                droplet_storage
-                                    .get(&added_droplets_count)
-                                    .with_context(|| {
-                                        format!("get droplet {} from storage", added_droplets_count)
-                                    })?;
-
-                            let droplet = droplet.ok_or_else(|| {
-                                anyhow::anyhow!("droplet {} not found", added_droplets_count)
-                            })?;
-
-                            decoder
-                                .add_encoded_droplet(droplet)
-                                .context("add droplet to decoder")?;
-
-                            added_droplets_count += 1;
-                        } else {
-                            // No more droplet files left
-                            log::error!(
-                                "Used all {added_droplets_count} droplets. No more droplet files left, need more droplets!"
-                            );
-                            bail!("Not enough droplets. Obtain or generate more droplets!");
+                    match blocks {
+                        Ok(_) => {}
+                        Err(err) => {
+                            log::error!("{:?}", err);
+                            break;
                         }
                     }
+                    let blocks = blocks?;
+                    log::debug!("sblk: {}, blkcount: {}", num, blocks.len());
+
+                    for (i, block) in blocks.into_iter().enumerate() {
+                        match self.output_chainman.inner.process_block(&block.to_block()?) {
+                            ProcessBlockResult::NewBlock => {
+                                log::debug!(
+                                    "<  Superblock #{num}: block #{i:<2} validated and written to disk"
+                                )
+                            }
+                            ProcessBlockResult::Duplicate => {
+                                log::debug!(
+                                    "<  Superblock #{num}: block #{i:<2} already known (valid)"
+                                )
+                            }
+                            ProcessBlockResult::Rejected => {
+                                log::error!(
+                                    "!! Superblock #{num}: block #{i:<2} validation failed!"
+                                );
+                                bail!("Superblock #{num}: block #{i:<2} validation failed!")
+                            }
+                        }
+                    }
+
+                    // All blocks from the droplet were inserted into the blockchain
+                } else {
+                    // Superblock was not decoded from all available droplets
+                    log::error!(
+                        "Superblock {superblock_num} could not be decoded. Used all available droplets. Need more droplets!"
+                    );
+                    bail!("Not enough droplets. Obtain or generate more droplets!");
                 }
             }
             // Next epoch

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use anyhow::Result;
 use rand::distr::Distribution;
@@ -46,7 +46,7 @@ where
     pub fn init_epoch(&mut self, epoch: usize, superblock_storage: S, current_droplet_count: usize)
     where
         S: Storage<usize, SuperBlock>,
-        S::Error: std::fmt::Debug,
+        S::Error: Debug,
     {
         _ = self.super_blocks.take(); // drop storage if present
 
